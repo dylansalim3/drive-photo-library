@@ -10,5 +10,5 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "drive-photo-library-db"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "858d6ccf-a2cd-4b20-afe6-436db5874440"
 migrations_dir = "migrations"
