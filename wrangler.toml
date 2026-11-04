@@ -2,6 +2,7 @@
 # No paid Cloudflare service is referenced here.
 name = "drive-photo-library"
 pages_build_output_dir = "dist"
+compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 
 # D1 binding. The database_id below is a PLACEHOLDER on purpose: replace it
