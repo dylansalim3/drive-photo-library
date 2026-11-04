@@ -1,0 +1,14 @@
+# drive-photo-library — Cloudflare Pages + Pages Functions + D1, free tier only.
+# No paid Cloudflare service is referenced here.
+name = "drive-photo-library"
+pages_build_output_dir = "dist"
+compatibility_flags = ["nodejs_compat"]
+
+# D1 binding. The database_id below is a PLACEHOLDER on purpose: replace it
+# with the real id from `wrangler d1 create drive-photo-library-db` at deploy
+# time. Do not invent or commit a real id here.
+[[d1_databases]]
+binding = "DB"
+database_name = "drive-photo-library-db"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "migrations"
