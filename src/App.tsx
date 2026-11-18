@@ -296,6 +296,24 @@ export default function App() {
       });
   }, [queue, refreshFiles]);
 
+  // Prefetch the neighbours of the open file so the next tap opens instantly
+  // on a slow connection. Browser cache only — nothing is saved offline, and
+  // videos are skipped (they already use preload="metadata").
+  useEffect(() => {
+    if (!selected) return;
+    const connection = (
+      navigator as Navigator & { connection?: { saveData?: boolean } }
+    ).connection;
+    if (connection?.saveData) return;
+    const index = files.findIndex((file) => file.id === selected.id);
+    if (index === -1) return;
+    for (const neighbour of [files[index - 1], files[index + 1]]) {
+      if (!neighbour || neighbour.isVideo) continue;
+      const image = new Image();
+      image.src = `/api/media/file?id=${encodeURIComponent(neighbour.id)}`;
+    }
+  }, [selected, files]);
+
   const addToQueue = useCallback((picked: File[]) => {
     setUploadNotice(null);
     setQueue((current) => [
