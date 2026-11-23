@@ -142,6 +142,7 @@ export function FileUpload({
   const [dragOver, setDragOver] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ width: 533, height: 164 });
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -253,13 +254,53 @@ export function FileUpload({
         if (!busy) setDragOver(true);
       }}
       onDragLeave={() => setDragOver(false)}
-      onDrop={(event) => {
+      onDrop={async (event) => {
         event.preventDefault();
         setDragOver(false);
-        const dropped = Array.from(event.dataTransfer.files ?? []);
-        if (dropped.length > 0 && !busy) {
-          if (onFilesSelected) startFiles(multiple ? dropped : dropped.slice(0, 1));
-          else startUpload(dropped[0]);
+        if (busy) return;
+
+        const files: File[] = [];
+        const items = Array.from(event.dataTransfer.items ?? []);
+
+        async function traverseEntry(entry: any, path = ""): Promise<void> {
+          if (entry.isFile) {
+            await new Promise<void>((resolve) => {
+              entry.file((file: File) => {
+                const relativePath = path ? `${path}/${file.name}` : file.name;
+                Object.defineProperty(file, "webkitRelativePath", {
+                  value: relativePath,
+                  configurable: true,
+                });
+                files.push(file);
+                resolve();
+              });
+            });
+          } else if (entry.isDirectory) {
+            const dirReader = entry.createReader();
+            const readEntries = async (): Promise<void> => {
+              const entries: any[] = await new Promise((resolve) => dirReader.readEntries(resolve));
+              if (entries.length > 0) {
+                for (const child of entries) {
+                  await traverseEntry(child, path ? `${path}/${entry.name}` : entry.name);
+                }
+                await readEntries();
+              }
+            };
+            await readEntries();
+          }
+        }
+
+        if (items.length > 0 && (items[0] as any).webkitGetAsEntry) {
+          for (const item of items) {
+            const entry = (item as any).webkitGetAsEntry();
+            if (entry) await traverseEntry(entry);
+          }
+        }
+
+        const finalFiles = files.length > 0 ? files : Array.from(event.dataTransfer.files ?? []);
+        if (finalFiles.length > 0) {
+          if (onFilesSelected) startFiles(multiple ? finalFiles : finalFiles.slice(0, 1));
+          else startUpload(finalFiles[0]);
         }
       }}
       className={cx(
@@ -276,6 +317,23 @@ export function FileUpload({
         multiple={multiple}
         aria-label="Choose files to upload"
         accept={allowedExtensions.map((extension) => `.${extension}`).join(",")}
+        className="sr-only"
+        tabIndex={-1}
+        onChange={(event) => {
+          const selected = Array.from(event.target.files ?? []);
+          event.target.value = "";
+          if (selected.length > 0) {
+            if (onFilesSelected) startFiles(multiple ? selected : selected.slice(0, 1));
+            else startUpload(selected[0]);
+          }
+        }}
+      />
+      <input
+        ref={folderInputRef}
+        type="file"
+        multiple
+        {...({ webkitdirectory: "", directory: "" } as React.InputHTMLAttributes<HTMLInputElement>)}
+        aria-label="Choose folder to upload"
         className="sr-only"
         tabIndex={-1}
         onChange={(event) => {
@@ -365,7 +423,17 @@ export function FileUpload({
           >
             {rejection ?? (
               <>
-                Drag and drop to upload or <span className="text-accent-500">select</span>
+                Drag & drop files or a folder, <span className="text-accent-500">browse files</span>, or{" "}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    folderInputRef.current?.click();
+                  }}
+                  className="text-accent-500 underline outline-none"
+                >
+                  choose folder
+                </button>
               </>
             )}
           </p>

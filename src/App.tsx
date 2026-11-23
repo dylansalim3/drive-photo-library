@@ -3,11 +3,13 @@ import {
   RiCheckLine,
   RiCloseLine,
   RiDownloadLine,
+  RiFolderAddLine,
   RiFolderLine,
   RiImageLine,
   RiLogoutBoxLine,
   RiRefreshLine,
   RiSearchLine,
+  RiStopCircleLine,
   RiVideoLine,
 } from "@remixicon/react";
 import { Avatar } from "@/components/base/avatar/avatar";
@@ -19,6 +21,7 @@ import { Input } from "@/components/base/input/input";
 import { Tab, TabList, Tabs } from "@/components/base/tabs/tabs";
 import {
   ApiError,
+  createFolder,
   formatBytes,
   formatDate,
   getManifest,
@@ -26,10 +29,13 @@ import {
   listFiles,
   login,
   logout,
+  markFolderSynced,
   markSynced,
   uploadFile,
   type AuthStatus,
+  type Breadcrumb,
   type DriveFile,
+  type DriveFolder,
   type Filter,
 } from "./api";
 
@@ -43,6 +49,8 @@ type QueueStatus = "queued" | "uploading" | "processing" | "confirmed" | "failed
 interface QueueItem {
   key: string;
   file: File;
+  folderPath?: string;
+  targetFolderId?: string;
   status: QueueStatus;
   progress: number;
   error?: string;
@@ -198,6 +206,9 @@ export default function App() {
   const [filter, setFilter] = useState<Filter>("not-sync");
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [currentFolderId, setCurrentFolderId] = useState<string | undefined>(undefined);
+  const [breadcrumbs, setBreadcrumbs] = useState<Breadcrumb[]>([]);
+  const [subfolders, setSubfolders] = useState<DriveFolder[]>([]);
   const [files, setFiles] = useState<DriveFile[]>([]);
   const [filesError, setFilesError] = useState<string | null>(null);
   const [loadingFiles, setLoadingFiles] = useState(false);
@@ -207,7 +218,20 @@ export default function App() {
   const [marking, setMarking] = useState(false);
   const [manifestBusy, setManifestBusy] = useState(false);
   const [manifestNotice, setManifestNotice] = useState<string | null>(null);
+
+  // New folder dialog state
+  const [showNewFolder, setShowNewFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [folderError, setFolderError] = useState<string | null>(null);
+
+  // Batch download state
+  const [batchDownloading, setBatchDownloading] = useState(false);
+  const [batchDownloadProgress, setBatchDownloadProgress] = useState<{ current: number; total: number } | null>(null);
+  const cancelBatchDownload = useRef(false);
+
   const queueProcessing = useRef(false);
+  const folderCache = useRef<Record<string, string>>({});
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -231,8 +255,10 @@ export default function App() {
     if (!status?.authenticated || !status.driveConnected) return;
     setLoadingFiles(true);
     try {
-      const data = await listFiles(filter, debouncedSearch);
+      const data = await listFiles(filter, debouncedSearch, currentFolderId);
       setFiles(data.files);
+      setSubfolders(data.subfolders ?? []);
+      setBreadcrumbs(data.breadcrumbs ?? []);
       setFilesError(null);
     } catch (err) {
       if (err instanceof ApiError && err.code === "DRIVE_NOT_CONNECTED") {
@@ -242,33 +268,63 @@ export default function App() {
         setFilesError(err instanceof Error ? err.message : "Could not load files.");
       }
       setFiles([]);
+      setSubfolders([]);
     } finally {
       setLoadingFiles(false);
     }
-  }, [status?.authenticated, status?.driveConnected, filter, debouncedSearch, refreshStatus]);
+  }, [status?.authenticated, status?.driveConnected, filter, debouncedSearch, currentFolderId, refreshStatus]);
 
   useEffect(() => {
     void refreshFiles();
   }, [refreshFiles]);
 
-  // Sequential queue: one real upload at a time, in the order picked.
+  // Sequential queue: resolves folder paths as needed, uploads one file at a time
   useEffect(() => {
     if (queueProcessing.current) return;
     const next = queue.find((item) => item.status === "queued");
     if (!next) return;
     queueProcessing.current = true;
+
     setQueue((current) =>
       current.map((item) => (item.key === next.key ? { ...item, status: "uploading", progress: 0 } : item)),
     );
-    void uploadFile(next.file, (percent, processing) => {
-      setQueue((current) =>
-        current.map((item) =>
-          item.key === next.key
-            ? { ...item, status: processing ? "processing" : "uploading", progress: percent }
-            : item,
-        ),
+
+    (async () => {
+      let targetId = next.targetFolderId;
+      if (!targetId && next.folderPath) {
+        const cacheKey = `${currentFolderId ?? "root"}:${next.folderPath}`;
+        if (folderCache.current[cacheKey]) {
+          targetId = folderCache.current[cacheKey];
+        } else {
+          setQueue((current) =>
+            current.map((item) =>
+              item.key === next.key ? { ...item, status: "processing", progress: 10 } : item,
+            ),
+          );
+          try {
+            const folderRes = await createFolder(next.folderPath, currentFolderId);
+            targetId = folderRes.folder.id;
+            folderCache.current[cacheKey] = targetId;
+          } catch {
+            targetId = currentFolderId;
+          }
+        }
+      }
+
+      return uploadFile(
+        next.file,
+        (percent, processing) => {
+          setQueue((current) =>
+            current.map((item) =>
+              item.key === next.key
+                ? { ...item, status: processing ? "processing" : "uploading", progress: percent }
+                : item,
+            ),
+          );
+        },
+        targetId,
       );
-    })
+    })()
       .then((result) => {
         setQueue((current) =>
           current.map((item) =>
@@ -277,9 +333,7 @@ export default function App() {
               : item,
           ),
         );
-        setUploadNotice(
-          `${next.file.name} is confirmed in Drive, tagged not-sync. It is safe to include it in your home download list.`,
-        );
+        setUploadNotice(`${next.file.name} is confirmed in Drive, tagged not-sync.`);
         void refreshFiles();
       })
       .catch((err: unknown) => {
@@ -294,11 +348,9 @@ export default function App() {
       .finally(() => {
         queueProcessing.current = false;
       });
-  }, [queue, refreshFiles]);
+  }, [queue, refreshFiles, currentFolderId]);
 
-  // Prefetch the neighbours of the open file so the next tap opens instantly
-  // on a slow connection. Browser cache only — nothing is saved offline, and
-  // videos are skipped (they already use preload="metadata").
+  // Prefetch neighbours of open file for instant next/prev browsing
   useEffect(() => {
     if (!selected) return;
     const connection = (
@@ -318,14 +370,79 @@ export default function App() {
     setUploadNotice(null);
     setQueue((current) => [
       ...current,
-      ...picked.map((file, index) => ({
-        key: `${Date.now()}-${index}-${file.name}-${file.size}`,
-        file,
-        status: "queued" as QueueStatus,
-        progress: 0,
-      })),
+      ...picked.map((file, index) => {
+        let folderPath: string | undefined = undefined;
+        if (file.webkitRelativePath) {
+          const parts = file.webkitRelativePath.split("/");
+          if (parts.length > 1) {
+            folderPath = parts.slice(0, parts.length - 1).join("/");
+          }
+        }
+        return {
+          key: `${Date.now()}-${index}-${file.name}-${file.size}`,
+          file,
+          folderPath,
+          targetFolderId: folderPath ? undefined : currentFolderId,
+          status: "queued" as QueueStatus,
+          progress: 0,
+        };
+      }),
     ]);
-  }, []);
+  }, [currentFolderId]);
+
+  const handleCreateFolderSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!newFolderName.trim()) return;
+    setCreatingFolder(true);
+    setFolderError(null);
+    try {
+      await createFolder(newFolderName.trim(), currentFolderId);
+      setNewFolderName("");
+      setShowNewFolder(false);
+      await refreshFiles();
+    } catch (err) {
+      setFolderError(err instanceof Error ? err.message : "Could not create folder.");
+    } finally {
+      setCreatingFolder(false);
+    }
+  };
+
+  const handleMarkFolderSynced = async (folderId: string) => {
+    setMarking(true);
+    try {
+      const res = await markFolderSynced(folderId);
+      setUploadNotice(`Folder and its contents (${res.movedCount} items) marked as synced.`);
+      await refreshFiles();
+    } catch (err) {
+      setUploadNotice(err instanceof Error ? err.message : "Could not sync folder.");
+    } finally {
+      setMarking(false);
+    }
+  };
+
+  const handleBatchDownload = async () => {
+    const notSyncFiles = files.filter((f) => f.syncStatus === "not-sync");
+    if (notSyncFiles.length === 0) return;
+    setBatchDownloading(true);
+    cancelBatchDownload.current = false;
+    setBatchDownloadProgress({ current: 0, total: notSyncFiles.length });
+
+    for (let i = 0; i < notSyncFiles.length; i++) {
+      if (cancelBatchDownload.current) break;
+      const file = notSyncFiles[i];
+      setBatchDownloadProgress({ current: i + 1, total: notSyncFiles.length });
+
+      const anchor = document.createElement("a");
+      anchor.href = `/api/media/file?id=${encodeURIComponent(file.id)}&download=1`;
+      anchor.download = file.name;
+      anchor.click();
+
+      await new Promise((r) => setTimeout(r, 250));
+    }
+
+    setBatchDownloading(false);
+    setBatchDownloadProgress(null);
+  };
 
   const handleMarkAllSynced = async () => {
     const notSync = files.filter((file) => file.syncStatus === "not-sync");
@@ -335,7 +452,7 @@ export default function App() {
       for (const file of notSync) {
         await markSynced(file.id);
       }
-      setUploadNotice(`${notSync.length} file(s) marked as synced and moved to Travel Archive.`);
+      setUploadNotice(`${notSync.length} file(s) marked as synced.`);
       await refreshFiles();
     } catch (err) {
       setUploadNotice(err instanceof Error ? err.message : "Could not mark all files as synced.");
@@ -383,6 +500,8 @@ export default function App() {
   }
 
   const confirmedCount = queue.filter((item) => item.status === "confirmed").length;
+  const activeUploadIndex = queue.findIndex((item) => item.status === "uploading" || item.status === "processing");
+  const currentFolderName = breadcrumbs[breadcrumbs.length - 1]?.name ?? (filter === "synced" ? "Travel Archive" : "Travel Inbox");
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-3xl flex-col px-4 pb-8 pt-4">
@@ -409,11 +528,50 @@ export default function App() {
       <Divider className="my-4" />
 
       <section aria-label="Upload">
-        <p className="text-title-3-semibold text-text-primary">Upload from this trip</p>
-        <p className="mt-1 text-body-2-regular text-text-secondary">
-          Pick photos and videos. Uploads through this page go to Travel Inbox and are tagged not-sync.
-          Files you batch-upload from your computer do not get the tag.
-        </p>
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <p className="text-title-3-semibold text-text-primary">Upload from this trip</p>
+            <p className="mt-1 text-body-2-regular text-text-secondary">
+              Upload photos, videos, or full folders into{" "}
+              <span className="font-semibold text-text-primary">{currentFolderName}</span>.
+            </p>
+          </div>
+          <Button
+            variant="secondary"
+            size="small"
+            leadingIcon={RiFolderAddLine}
+            onClick={() => setShowNewFolder((v) => !v)}
+          >
+            New folder
+          </Button>
+        </div>
+
+        {showNewFolder && (
+          <form
+            onSubmit={handleCreateFolderSubmit}
+            className="mt-3 flex flex-col gap-3 rounded-2xl border border-border-button-default bg-background-primary-default p-3 sm:flex-row sm:items-end"
+          >
+            <div className="flex-1">
+              <Input
+                label={`Create subfolder inside ${currentFolderName}`}
+                placeholder="e.g. Kyoto Day 1"
+                value={newFolderName}
+                onChange={setNewFolderName}
+                autoFocus
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant="primary" size="small" type="submit" disabled={creatingFolder || !newFolderName.trim()}>
+                {creatingFolder ? "Creating…" : "Create folder"}
+              </Button>
+              <Button variant="ghost" size="small" onClick={() => setShowNewFolder(false)}>
+                Cancel
+              </Button>
+            </div>
+          </form>
+        )}
+        {folderError && <div className="mt-2"><ErrorBanner message={folderError} /></div>}
+
         <div className="mt-3">
           <FileUpload
             multiple
@@ -422,22 +580,30 @@ export default function App() {
             maxBytes={1024 * 1024 * 1024}
           />
         </div>
+
         {queue.length > 0 && (
           <div className="mt-3 flex flex-col gap-2">
-            <p className="text-body-medium text-text-primary">
-              Upload queue{confirmedCount > 0 ? ` · ${confirmedCount} confirmed` : ""}
-            </p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-body-medium text-text-primary">
+                Upload queue:{" "}
+                {activeUploadIndex >= 0 ? `Uploading ${activeUploadIndex + 1} of ${queue.length}` : "Completed"}
+                {confirmedCount > 0 ? ` · ${confirmedCount} confirmed` : ""}
+              </p>
+            </div>
             {queue.map((item) => (
               <div
                 key={item.key}
                 className="flex items-center justify-between gap-3 rounded-2xl border border-border-button-default bg-background-primary-default p-3"
               >
                 <div className="min-w-0">
-                  <p className="truncate text-body-medium text-text-primary">{item.file.name}</p>
+                  <p className="truncate text-body-medium text-text-primary">
+                    {item.folderPath ? `${item.folderPath}/` : ""}
+                    {item.file.name}
+                  </p>
                   <p className="text-body-2-regular text-text-secondary">
                     {formatBytes(String(item.file.size))}
                     {item.status === "uploading" ? ` · ${item.progress}%` : ""}
-                    {item.status === "processing" ? " · Processing in Drive…" : ""}
+                    {item.status === "processing" ? " · Processing folder in Drive…" : ""}
                     {item.error ? ` · ${item.error}` : ""}
                   </p>
                 </div>
@@ -446,6 +612,7 @@ export default function App() {
             ))}
           </div>
         )}
+
         {uploadNotice && (
           <div className="mt-3">
             <Notice title="Upload update">
@@ -478,7 +645,10 @@ export default function App() {
         <div className="mt-3">
           <Tabs
             selectedKey={filter}
-            onSelectionChange={(key) => setFilter(key as Filter)}
+            onSelectionChange={(key) => {
+              setFilter(key as Filter);
+              setCurrentFolderId(undefined);
+            }}
             aria-label="Library filter"
           >
             <TabList aria-label="Library filter">
@@ -489,15 +659,60 @@ export default function App() {
           </Tabs>
         </div>
 
+        {breadcrumbs.length > 1 && (
+          <nav aria-label="Folder breadcrumbs" className="mt-4 flex items-center flex-wrap gap-1 text-body-2-medium">
+            {breadcrumbs.map((crumb, idx) => {
+              const isLast = idx === breadcrumbs.length - 1;
+              return (
+                <span key={crumb.id} className="flex items-center gap-1">
+                  {idx > 0 && <span className="text-text-tertiary">/</span>}
+                  {isLast ? (
+                    <span className="font-semibold text-text-primary">{crumb.name}</span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setCurrentFolderId(idx === 0 ? undefined : crumb.id)}
+                      className="text-accent-500 hover:underline outline-none"
+                    >
+                      {crumb.name}
+                    </button>
+                  )}
+                </span>
+              );
+            })}
+          </nav>
+        )}
+
         {filter === "not-sync" && (
           <div className="mt-4">
-            <Notice title="Download at home, not from this phone">
+            <Notice title="Download options for not-sync media">
               <p>
-                Bulk download is done from a computer at home. From here you can save the not-sync
-                manifest (the file list) and download single files. The manifest needs your login on
-                that computer too.
+                Download files in bulk directly here, or save the manifest for unattended bulk download on your home PC.
               </p>
               <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="primary"
+                  size="small"
+                  leadingIcon={RiDownloadLine}
+                  disabled={batchDownloading || files.filter((f) => f.syncStatus === "not-sync").length === 0}
+                  onClick={() => void handleBatchDownload()}
+                >
+                  {batchDownloading && batchDownloadProgress
+                    ? `Downloading ${batchDownloadProgress.current}/${batchDownloadProgress.total}…`
+                    : `Batch download (${files.filter((f) => f.syncStatus === "not-sync").length} files)`}
+                </Button>
+                {batchDownloading && (
+                  <Button
+                    variant="ghost"
+                    size="small"
+                    leadingIcon={RiStopCircleLine}
+                    onClick={() => {
+                      cancelBatchDownload.current = true;
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                )}
                 <Button
                   variant="secondary"
                   size="small"
@@ -528,58 +743,107 @@ export default function App() {
           </div>
         )}
 
-        {loadingFiles && files.length === 0 ? (
+        {subfolders.length > 0 && (
+          <div className="mt-4">
+            <p className="text-body-medium text-text-secondary">Folders ({subfolders.length})</p>
+            <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {subfolders.map((folder) => (
+                <div
+                  key={folder.id}
+                  onClick={() => setCurrentFolderId(folder.id)}
+                  role="button"
+                  tabIndex={0}
+                  className="group flex flex-col justify-between rounded-2xl border border-border-button-default bg-background-primary-default p-3.5 text-start cursor-pointer hover:border-border-button-active transition-colors outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <RiFolderLine className="size-6 shrink-0 text-accent-500" aria-hidden />
+                    <Chip variant="caption" color={folder.syncStatus === "not-sync" ? "yellow" : "lime"}>
+                      {folder.syncStatus === "not-sync" ? "Not-sync" : "Synced"}
+                    </Chip>
+                  </div>
+                  <div className="mt-3">
+                    <p className="truncate text-body-medium font-medium text-text-primary group-hover:text-accent-500 transition-colors">
+                      {folder.name}
+                    </p>
+                    <p className="text-caption-1-regular text-text-tertiary">Folder</p>
+                  </div>
+                  {folder.syncStatus === "not-sync" && (
+                    <div className="mt-2 border-t border-border-secondary pt-2">
+                      <Button
+                        variant="ghost"
+                        size="small"
+                        leadingIcon={RiCheckLine}
+                        disabled={marking}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleMarkFolderSynced(folder.id);
+                        }}
+                      >
+                        Sync folder
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {loadingFiles && files.length === 0 && subfolders.length === 0 ? (
           <p className="mt-6 text-body-regular text-text-secondary">Loading library…</p>
-        ) : files.length === 0 ? (
+        ) : files.length === 0 && subfolders.length === 0 ? (
           <p className="mt-6 text-body-regular text-text-secondary">
-            No files in this view yet. Upload from this trip, or batch-upload from your computer to
-            Travel Archive for already-synced files.
+            No files or folders in this view yet. Upload photos, videos, or folders from this trip!
           </p>
         ) : (
           <>
-            <p className="mt-4 text-body-2-regular text-text-secondary">
-              {files.length} file(s) in this view. Thumbnails only — full photos and videos load only
-              when you tap one.
-            </p>
-            <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {files.map((file) => (
-                <button
-                  key={file.id}
-                  type="button"
-                  onClick={() => setSelected(file)}
-                  className="overflow-hidden rounded-3xl border border-border-button-default bg-background-primary-default text-start outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring"
-                >
-                  <img
-                    src={`/api/media/thumbnail?id=${encodeURIComponent(file.id)}`}
-                    alt={file.name}
-                    loading="lazy"
-                    decoding="async"
-                    className="aspect-square w-full object-cover"
-                  />
-                  <div className="flex items-start justify-between gap-2 p-3">
-                    <div className="min-w-0">
-                      <p className="truncate text-body-medium text-text-primary">{file.name}</p>
-                      <p className="text-body-2-regular text-text-secondary">
-                        {[formatBytes(file.size), formatDate(file.createdTime)].filter(Boolean).join(" · ")}
-                      </p>
-                    </div>
-                    {file.isVideo ? (
-                      <RiVideoLine className="size-5 shrink-0 text-foreground-icon-secondary" aria-hidden />
-                    ) : (
-                      <RiImageLine className="size-5 shrink-0 text-foreground-icon-secondary" aria-hidden />
-                    )}
-                  </div>
-                  <div className="px-3 pb-3">
-                    <Chip
-                      variant="caption"
-                      color={file.syncStatus === "not-sync" ? "yellow" : file.syncStatus === "synced" ? "lime" : "soft"}
+            {files.length > 0 && (
+              <>
+                <p className="mt-4 text-body-2-regular text-text-secondary">
+                  {files.length} file(s) in this folder. Thumbnails only — full photos and videos load only
+                  when you tap one.
+                </p>
+                <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  {files.map((file) => (
+                    <button
+                      key={file.id}
+                      type="button"
+                      onClick={() => setSelected(file)}
+                      className="overflow-hidden rounded-3xl border border-border-button-default bg-background-primary-default text-start outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring"
                     >
-                      {file.syncStatus === "not-sync" ? "Not-sync" : file.syncStatus === "synced" ? "Synced" : "Unknown"}
-                    </Chip>
-                  </div>
-                </button>
-              ))}
-            </div>
+                      <img
+                        src={`/api/media/thumbnail?id=${encodeURIComponent(file.id)}`}
+                        alt={file.name}
+                        loading="lazy"
+                        decoding="async"
+                        className="aspect-square w-full object-cover"
+                      />
+                      <div className="flex items-start justify-between gap-2 p-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-body-medium text-text-primary">{file.name}</p>
+                          <p className="text-body-2-regular text-text-secondary">
+                            {[formatBytes(file.size), formatDate(file.createdTime)].filter(Boolean).join(" · ")}
+                          </p>
+                        </div>
+                        {file.isVideo ? (
+                          <RiVideoLine className="size-5 shrink-0 text-foreground-icon-secondary" aria-hidden />
+                        ) : (
+                          <RiImageLine className="size-5 shrink-0 text-foreground-icon-secondary" aria-hidden />
+                        )}
+                      </div>
+                      <div className="px-3 pb-3">
+                        <Chip
+                          variant="caption"
+                          color={file.syncStatus === "not-sync" ? "yellow" : file.syncStatus === "synced" ? "lime" : "soft"}
+                        >
+                          {file.syncStatus === "not-sync" ? "Not-sync" : file.syncStatus === "synced" ? "Synced" : "Unknown"}
+                        </Chip>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </>
         )}
       </section>
