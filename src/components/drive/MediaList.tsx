@@ -121,7 +121,9 @@ function MediaRow({
             {file.name}
           </p>
           <p className="text-caption-1-regular text-text-secondary truncate">
-            {[formatBytes(file.size), formatDate(file.createdTime)].filter(Boolean).join(" · ")}
+            {[formatBytes(file.size), formatDate(file.createdTime), file.uploadedBy ? `by @${file.uploadedBy}` : null]
+              .filter(Boolean)
+              .join(" · ")}
           </p>
         </div>
       </div>

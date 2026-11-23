@@ -9,11 +9,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -22,7 +23,6 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -47,9 +47,13 @@ fun MediaSortFilterBar(
     dateGrouping: DateGroupingMode,
     onDateGroupingChange: (DateGroupingMode) -> Unit,
     totalCount: Int,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    uploaderFilter: String? = null,
+    onUploaderFilterChange: ((String?) -> Unit)? = null,
+    uploaders: List<String> = emptyList()
 ) {
     var sortMenuExpanded by remember { mutableStateOf(false) }
+    var uploaderMenuExpanded by remember { mutableStateOf(false) }
 
     Row(
         modifier = modifier
@@ -58,7 +62,7 @@ fun MediaSortFilterBar(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Media Type Filter Chips (All, Photos, Videos)
+        // Media Type & Uploader Filter Chips
         Row(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -96,6 +100,73 @@ fun MediaSortFilterBar(
                     )
                 }
             )
+
+            // Uploader Filter Chip
+            if (uploaders.isNotEmpty() && onUploaderFilterChange != null) {
+                Box {
+                    FilterChip(
+                        selected = !uploaderFilter.isNullOrBlank() && uploaderFilter != "all",
+                        onClick = { uploaderMenuExpanded = true },
+                        label = {
+                            Text(
+                                text = if (!uploaderFilter.isNullOrBlank() && uploaderFilter != "all") {
+                                    "@$uploaderFilter"
+                                } else {
+                                    "Uploaders"
+                                },
+                                fontSize = 12.sp
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    )
+
+                    DropdownMenu(
+                        expanded = uploaderMenuExpanded,
+                        onDismissRequest = { uploaderMenuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("All uploaders") },
+                            trailingIcon = if (uploaderFilter.isNullOrBlank() || uploaderFilter == "all") {
+                                {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            } else null,
+                            onClick = {
+                                onUploaderFilterChange("all")
+                                uploaderMenuExpanded = false
+                            }
+                        )
+                        uploaders.forEach { uploader ->
+                            DropdownMenuItem(
+                                text = { Text("@$uploader") },
+                                trailingIcon = if (uploaderFilter == uploader) {
+                                    {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                } else null,
+                                onClick = {
+                                    onUploaderFilterChange(uploader)
+                                    uploaderMenuExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         // Right side: Sort Dropdown & Grouping Toggle
@@ -110,7 +181,7 @@ fun MediaSortFilterBar(
                     modifier = Modifier.size(36.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Sort,
+                        imageVector = Icons.AutoMirrored.Filled.Sort,
                         contentDescription = "Sort media: ${sortOption.label}",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(20.dp)

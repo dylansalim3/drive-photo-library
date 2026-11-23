@@ -139,8 +139,13 @@ fun MediaListItem(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(top = 2.dp)
             ) {
+                val meta = listOfNotNull(
+                    Formatters.formatBytes(file.size).ifBlank { null },
+                    Formatters.formatDate(file.createdTime ?: file.modifiedTime).ifBlank { null },
+                    file.uploadedBy?.let { "by @$it" }
+                ).joinToString(" • ")
                 Text(
-                    text = "${Formatters.formatBytes(file.size)} • ${Formatters.formatDate(file.createdTime ?: file.modifiedTime)}",
+                    text = meta,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

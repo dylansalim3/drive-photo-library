@@ -126,7 +126,9 @@ function MediaCard({
             {file.name}
           </p>
           <p className="mt-0.5 text-caption-2-regular text-white/75 truncate drop-shadow-xs">
-            {[formatBytes(file.size), formatDate(file.createdTime)].filter(Boolean).join(" · ")}
+            {[formatBytes(file.size), formatDate(file.createdTime), file.uploadedBy ? `@${file.uploadedBy}` : null]
+              .filter(Boolean)
+              .join(" · ")}
           </p>
         </div>
       </div>

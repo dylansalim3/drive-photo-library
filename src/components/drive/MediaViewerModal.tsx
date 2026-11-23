@@ -114,7 +114,9 @@ export function MediaViewerModal({
               {file.name}
             </p>
             <p className="text-caption-1-regular text-white/70 truncate drop-shadow-xs">
-              {[formatBytes(file.size), formatDate(file.createdTime)].filter(Boolean).join(" · ")}
+              {[formatBytes(file.size), formatDate(file.createdTime), file.uploadedBy ? `Uploaded by @${file.uploadedBy}` : null]
+                .filter(Boolean)
+                .join(" · ")}
             </p>
           </div>
         </div>

@@ -35,6 +35,7 @@ export interface DriveFileOut {
   createdTime?: string;
   modifiedTime?: string;
   syncStatus: "not-sync" | "synced" | "unknown";
+  uploadedBy?: string;
   isVideo: boolean;
   isImage: boolean;
 }
@@ -54,6 +55,7 @@ export function toDriveFile(
             (rootId && file.parents?.includes(rootId))
           ? "synced"
           : "unknown";
+  const uploadedBy = file.properties?.["uploadedBy"] || undefined;
   return {
     id: file.id,
     name: file.name,
@@ -62,6 +64,7 @@ export function toDriveFile(
     createdTime: file.createdTime,
     modifiedTime: file.modifiedTime,
     syncStatus,
+    uploadedBy,
     isVideo: file.mimeType.startsWith("video/"),
     isImage: file.mimeType.startsWith("image/"),
   };

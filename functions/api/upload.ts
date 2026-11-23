@@ -62,7 +62,7 @@ export async function onRequestPost(context: PagesContext): Promise<Response> {
   const metadata = JSON.stringify({
     name: file.name,
     parents: [targetFolderId],
-    properties: { syncStatus: "not-sync" },
+    properties: { syncStatus: "not-sync", uploadedBy: session },
   });
   const header = new TextEncoder().encode(
     `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n` +

@@ -1,16 +1,13 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
-  RiCheckLine,
   RiCloseLine,
   RiComputerLine,
-  RiDownloadLine,
   RiFolderAddLine,
   RiFolderLine,
   RiLogoutBoxLine,
   RiMoonLine,
   RiRefreshLine,
   RiSettings3Line,
-  RiStopCircleLine,
   RiSunLine,
 } from "@remixicon/react";
 import { Avatar } from "@/components/base/avatar/avatar";
@@ -29,6 +26,7 @@ import { MediaList } from "./components/drive/MediaList";
 import { MediaSortFilterBar } from "./components/drive/MediaSortFilterBar";
 import { MediaViewerModal } from "./components/drive/MediaViewerModal";
 import { MobileFabSheet } from "./components/drive/MobileFabSheet";
+import { SyncManagerModal } from "./components/drive/SyncManagerModal";
 import { UserManagerSection } from "./components/drive/UserManagerSection";
 import {
   filterAndSortFiles,
@@ -326,6 +324,7 @@ export default function App() {
     }
   });
   const [mediaTypeFilter, setMediaTypeFilter] = useState<MediaTypeFilter>("all");
+  const [uploaderFilter, setUploaderFilter] = useState("all");
   const [dateGrouping, setDateGrouping] = useState<DateGroupingMode>(() => {
     try {
       return (localStorage.getItem("drive-date-grouping") as DateGroupingMode) || "grouped";
@@ -341,6 +340,7 @@ export default function App() {
 
   // Settings & Theme
   const [showSettings, setShowSettings] = useState(false);
+  const [showSyncModal, setShowSyncModal] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => getStoredTheme());
 
   // New folder dialog state
@@ -378,7 +378,15 @@ export default function App() {
     } catch {}
   };
 
-  const processedFiles = filterAndSortFiles(files, mediaTypeFilter, sortOption);
+  const uploaders = useMemo(() => {
+    const set = new Set<string>();
+    for (const f of files) {
+      if (f.uploadedBy) set.add(f.uploadedBy);
+    }
+    return Array.from(set);
+  }, [files]);
+
+  const processedFiles = filterAndSortFiles(files, mediaTypeFilter, sortOption, uploaderFilter);
 
   const handleSelectFile = (file: DriveFile, index: number) => {
     setSelected(file);
@@ -729,6 +737,8 @@ export default function App() {
         onSignOut={() => {
           void logout().finally(() => void refreshStatus());
         }}
+        onOpenSync={() => setShowSyncModal(true)}
+        unsyncedCount={files.filter((f) => f.syncStatus === "not-sync").length}
       />
 
       {/* Filter Tabs & Navigation Bar */}
@@ -858,61 +868,6 @@ export default function App() {
         )}
       </section>
 
-      {/* Not-sync download options notice */}
-      {filter === "not-sync" && (
-        <div className="mt-3">
-          <Notice title="Download options for not-sync media">
-            <p>
-              Download files in bulk directly here, or save the manifest for unattended bulk download on your home PC.
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                variant="primary"
-                size="small"
-                leadingIcon={RiDownloadLine}
-                disabled={batchDownloading || files.filter((f) => f.syncStatus === "not-sync").length === 0}
-                onClick={() => void handleBatchDownload()}
-              >
-                {batchDownloading && batchDownloadProgress
-                  ? `Downloading ${batchDownloadProgress.current}/${batchDownloadProgress.total}…`
-                  : `Batch download (${files.filter((f) => f.syncStatus === "not-sync").length} files)`}
-              </Button>
-              {batchDownloading && (
-                <Button
-                  variant="ghost"
-                  size="small"
-                  leadingIcon={RiStopCircleLine}
-                  onClick={() => {
-                    cancelBatchDownload.current = true;
-                  }}
-                >
-                  Cancel
-                </Button>
-              )}
-              <Button
-                variant="secondary"
-                size="small"
-                leadingIcon={RiDownloadLine}
-                disabled={manifestBusy || files.length === 0}
-                onClick={() => void handleDownloadManifest()}
-              >
-                {manifestBusy ? "Preparing…" : "Download manifest"}
-              </Button>
-              <Button
-                variant="secondary"
-                size="small"
-                leadingIcon={RiCheckLine}
-                disabled={marking || files.filter((file) => file.syncStatus === "not-sync").length === 0}
-                onClick={() => void handleMarkAllSynced()}
-              >
-                {marking ? "Marking…" : "Mark all as synced"}
-              </Button>
-            </div>
-            {manifestNotice && <p>{manifestNotice}</p>}
-          </Notice>
-        </div>
-      )}
-
       {filesError && (
         <div className="mt-3">
           <ErrorBanner message={filesError} />
@@ -952,6 +907,9 @@ export default function App() {
                 dateGrouping={dateGrouping}
                 onDateGroupingChange={handleDateGroupingChange}
                 totalCount={files.length}
+                uploaderFilter={uploaderFilter}
+                onUploaderFilterChange={setUploaderFilter}
+                uploaders={uploaders}
               />
 
               {processedFiles.length === 0 ? (
@@ -1138,6 +1096,24 @@ export default function App() {
           marking={marking}
         />
       )}
+
+      {/* Vacation Sync & Export Center Modal */}
+      <SyncManagerModal
+        isOpen={showSyncModal}
+        onClose={() => setShowSyncModal(false)}
+        files={files}
+        onBatchDownload={handleBatchDownload}
+        batchDownloading={batchDownloading}
+        batchProgress={batchDownloadProgress}
+        onCancelBatch={() => {
+          cancelBatchDownload.current = true;
+        }}
+        onDownloadManifest={handleDownloadManifest}
+        manifestBusy={manifestBusy}
+        manifestNotice={manifestNotice}
+        onMarkAllSynced={handleMarkAllSynced}
+        marking={marking}
+      />
     </main>
   );
 }

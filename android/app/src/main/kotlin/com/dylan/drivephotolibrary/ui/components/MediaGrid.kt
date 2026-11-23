@@ -221,21 +221,18 @@ fun MediaGridItem(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = Formatters.formatBytes(file.size),
-                            color = Color(0xCCFFFFFF),
-                            fontSize = 10.sp
-                        )
-                        Text(
-                            text = Formatters.formatDate(file.createdTime ?: file.modifiedTime),
-                            color = Color(0xCCFFFFFF),
-                            fontSize = 10.sp
-                        )
-                    }
+                    val meta = listOfNotNull(
+                        Formatters.formatBytes(file.size).ifBlank { null },
+                        Formatters.formatDate(file.createdTime ?: file.modifiedTime).ifBlank { null },
+                        file.uploadedBy?.let { "@$it" }
+                    ).joinToString(" • ")
+                    Text(
+                        text = meta,
+                        color = Color(0xCCFFFFFF),
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
         }

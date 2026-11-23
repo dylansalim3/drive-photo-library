@@ -284,7 +284,10 @@ fun DriveScreen(
                             onSortOptionChange = { viewModel.setSortOption(it) },
                             dateGrouping = uiState.dateGrouping,
                             onDateGroupingChange = { viewModel.setDateGrouping(it) },
-                            totalCount = uiState.files.size
+                            totalCount = uiState.files.size,
+                            uploaderFilter = uiState.uploaderFilter,
+                            onUploaderFilterChange = { viewModel.setUploaderFilter(it) },
+                            uploaders = uiState.uploaders
                         )
 
                         if (uiState.processedFiles.isEmpty()) {

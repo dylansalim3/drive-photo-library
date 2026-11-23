@@ -143,8 +143,9 @@ fun MediaViewerDialog(
                             overflow = TextOverflow.Ellipsis
                         )
                         val meta = listOfNotNull(
-                            Formatters.formatBytes(currentFile.size),
-                            Formatters.formatDate(currentFile.createdTime)
+                            Formatters.formatBytes(currentFile.size).ifBlank { null },
+                            Formatters.formatDate(currentFile.createdTime ?: currentFile.modifiedTime).ifBlank { null },
+                            currentFile.uploadedBy?.let { "Uploaded by @$it" }
                         ).joinToString(" · ")
                         if (meta.isNotBlank()) {
                             Text(

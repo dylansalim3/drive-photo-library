@@ -12,6 +12,7 @@ data class DriveFile(
     val modifiedTime: String? = null,
     val isVideo: Boolean = false,
     val syncStatus: String = "not-sync",
+    val uploadedBy: String? = null,
     val thumbnailLink: String? = null
 )
 

@@ -86,18 +86,25 @@ data class DriveUiState(
     val viewMode: ViewMode = ViewMode.GRID,
     val sortOption: SortOption = SortOption.DATE_DESC,
     val mediaTypeFilter: MediaTypeFilter = MediaTypeFilter.ALL,
+    val uploaderFilter: String? = null,
     val dateGrouping: DateGroupingMode = DateGroupingMode.GROUPED,
     val selectedFileIndex: Int? = null,
     val isUploading: Boolean = false,
     val uploadNotice: String? = null,
     val actionNotice: String? = null
 ) {
+    val uploaders: List<String>
+        get() = files.mapNotNull { it.uploadedBy }.distinct()
+
     val processedFiles: List<DriveFile>
         get() {
-            val filtered = when (mediaTypeFilter) {
+            var filtered = when (mediaTypeFilter) {
                 MediaTypeFilter.ALL -> files
                 MediaTypeFilter.PHOTOS -> files.filter { !it.isVideo }
                 MediaTypeFilter.VIDEOS -> files.filter { it.isVideo }
+            }
+            if (!uploaderFilter.isNullOrBlank() && uploaderFilter != "all") {
+                filtered = filtered.filter { it.uploadedBy == uploaderFilter }
             }
             return when (sortOption) {
                 SortOption.DATE_DESC -> filtered.sortedByDescending { it.createdTime ?: it.modifiedTime ?: "" }
@@ -218,6 +225,10 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
     fun setDateGrouping(mode: DateGroupingMode) {
         prefs.edit().putString("date_grouping", mode.name).apply()
         _uiState.update { it.copy(dateGrouping = mode) }
+    }
+
+    fun setUploaderFilter(uploader: String?) {
+        _uiState.update { it.copy(uploaderFilter = uploader) }
     }
 
     fun navigateToFolder(folderId: String?) {

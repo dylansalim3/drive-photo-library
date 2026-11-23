@@ -8,6 +8,7 @@ export interface DriveFile {
   createdTime?: string;
   modifiedTime?: string;
   syncStatus: "not-sync" | "synced" | "unknown";
+  uploadedBy?: string;
   isVideo: boolean;
   isImage: boolean;
 }

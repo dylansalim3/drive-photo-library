@@ -1,6 +1,7 @@
 import { type ChangeEvent } from "react";
 import {
   RiCloseCircleLine,
+  RiDownloadCloud2Line,
   RiGridLine,
   RiListCheck,
   RiLogoutBoxLine,
@@ -19,6 +20,8 @@ export interface DriveHeaderProps {
   onViewModeChange: (mode: "grid" | "list") => void;
   onOpenSettings: () => void;
   onSignOut: () => void;
+  onOpenSync?: () => void;
+  unsyncedCount?: number;
 }
 
 export function DriveHeader({
@@ -29,6 +32,8 @@ export function DriveHeader({
   onViewModeChange,
   onOpenSettings,
   onSignOut,
+  onOpenSync,
+  unsyncedCount,
 }: DriveHeaderProps) {
   const handleClear = () => {
     onSearchChange("");
@@ -55,6 +60,25 @@ export function DriveHeader({
 
         {/* View Switcher & Action Controls */}
         <div className="flex items-center gap-1.5 shrink-0">
+          {/* Vacation Sync & Export Button */}
+          {onOpenSync && (
+            <button
+              type="button"
+              onClick={onOpenSync}
+              title="Vacation Sync & Export Center"
+              aria-label="Vacation Sync & Export Center"
+              className="flex items-center gap-1.5 rounded-xl border border-border-button-default bg-background-secondary-default px-2.5 py-1.5 text-body-2-medium text-text-secondary hover:bg-background-primary-default hover:text-text-primary transition-colors"
+            >
+              <RiDownloadCloud2Line className="size-4 text-accent-500" />
+              <span className="hidden sm:inline">Sync & Export</span>
+              {unsyncedCount !== undefined && unsyncedCount > 0 && (
+                <span className="rounded-full bg-accent-500 px-1.5 py-0.2 text-[10px] font-bold text-white leading-tight">
+                  {unsyncedCount}
+                </span>
+              )}
+            </button>
+          )}
+
           {/* View Mode Toggle Pill */}
           <div className="flex items-center rounded-xl border border-border-button-default bg-background-secondary-default p-0.5">
             <button

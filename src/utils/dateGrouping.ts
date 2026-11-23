@@ -55,7 +55,8 @@ export function getDateGroupLabel(dateStr?: string | null): string {
 export function filterAndSortFiles(
   files: DriveFile[],
   mediaType: MediaTypeFilter,
-  sortOption: SortOption
+  sortOption: SortOption,
+  uploaderFilter: string = "all",
 ): DriveFile[] {
   // 1. Filter by media type
   let filtered = files;
@@ -65,7 +66,12 @@ export function filterAndSortFiles(
     filtered = files.filter((f) => f.isVideo);
   }
 
-  // 2. Sort
+  // 2. Filter by uploader
+  if (uploaderFilter && uploaderFilter !== "all") {
+    filtered = filtered.filter((f) => f.uploadedBy === uploaderFilter);
+  }
+
+  // 3. Sort
   return [...filtered].sort((a, b) => {
     switch (sortOption) {
       case "date-desc": {
