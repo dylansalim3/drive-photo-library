@@ -21,6 +21,19 @@ export interface Env {
   DRIVE_ROOT_FOLDER_ID?: string;
 }
 
+export interface Breadcrumb {
+  id: string;
+  name: string;
+}
+
+export interface DriveFolderOut {
+  id: string;
+  name: string;
+  parentId?: string;
+  itemCount?: number;
+  syncStatus: "not-sync" | "synced" | "unknown";
+}
+
 export interface PagesContext {
   request: Request;
   env: Env;

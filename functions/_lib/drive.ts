@@ -1,5 +1,5 @@
 import { decryptText, encryptText } from "./crypto";
-import type { Env } from "./types";
+import type { Breadcrumb, DriveFolderOut, Env } from "./types";
 
 export const INBOX_FOLDER = "Travel Inbox";
 export const ARCHIVE_FOLDER = "Travel Archive";
@@ -187,16 +187,20 @@ export async function findOrCreateFolder(
   env: Env,
   name: string,
   parentId?: string | null,
+  syncStatus: string | null = "not-sync",
 ): Promise<string | null> {
   const parentIdTarget = parentId !== undefined ? parentId : getRootFolderId(env);
   const existing = await findFolder(env, name, parentIdTarget);
   if (existing) return existing.id;
-  const payload: { name: string; mimeType: string; parents?: string[] } = {
+  const payload: { name: string; mimeType: string; parents?: string[]; properties?: Record<string, string> } = {
     name,
     mimeType: "application/vnd.google-apps.folder",
   };
   if (parentIdTarget) {
     payload.parents = [parentIdTarget];
+  }
+  if (syncStatus) {
+    payload.properties = { syncStatus };
   }
   const response = await driveFetch(env, "/drive/v3/files", {
     method: "POST",
@@ -206,6 +210,171 @@ export async function findOrCreateFolder(
   if (!response || !response.ok) return null;
   const body = (await response.json()) as { id?: string };
   return body.id ?? null;
+}
+
+export async function resolveNestedFolderPath(
+  env: Env,
+  path: string,
+  rootParentId?: string,
+): Promise<{ id: string; name: string; parentId: string; path: string } | null> {
+  const segments = path
+    .split("/")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (segments.length === 0) return null;
+
+  let currentParentId = rootParentId ?? (await findOrCreateFolder(env, INBOX_FOLDER, undefined, null));
+  if (!currentParentId) return null;
+
+  let lastId = currentParentId;
+  let lastName = "";
+  let lastParent = currentParentId;
+
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    const createdId = await findOrCreateFolder(env, seg, currentParentId, "not-sync");
+    if (!createdId) return null;
+    lastParent = currentParentId;
+    lastId = createdId;
+    lastName = seg;
+    currentParentId = createdId;
+  }
+
+  return {
+    id: lastId,
+    name: lastName,
+    parentId: lastParent,
+    path: segments.join("/"),
+  };
+}
+
+export async function listSubfolders(
+  env: Env,
+  parentId: string,
+): Promise<DriveFolderOut[] | null> {
+  const query = `mimeType = 'application/vnd.google-apps.folder' and '${escapeDriveQuery(parentId)}' in parents and trashed = false`;
+  const response = await driveFetch(
+    env,
+    `/drive/v3/files?q=${encodeURIComponent(query)}&fields=${encodeURIComponent(
+      "files(id,name,parents,properties)",
+    )}&orderBy=name asc&pageSize=100`,
+  );
+  if (!response || !response.ok) return null;
+  const body = (await response.json()) as { files?: DriveFileRaw[] };
+  const folders = body.files ?? [];
+  return folders.map((f) => {
+    const raw = f.properties?.["syncStatus"];
+    const syncStatus: DriveFolderOut["syncStatus"] =
+      raw === "not-sync" ? "not-sync" : raw === "synced" ? "synced" : "unknown";
+    return {
+      id: f.id,
+      name: f.name,
+      parentId: f.parents?.[0],
+      syncStatus,
+    };
+  });
+}
+
+export async function getBreadcrumbs(
+  env: Env,
+  currentFolderId: string,
+  stopFolderId?: string,
+): Promise<Breadcrumb[]> {
+  const crumbs: Breadcrumb[] = [];
+  let currId: string | null = currentFolderId;
+  const maxDepth = 10;
+  let depth = 0;
+
+  while (currId && depth < maxDepth) {
+    depth++;
+    const res = await driveFetch(
+      env,
+      `/drive/v3/files/${encodeURIComponent(currId)}?fields=${encodeURIComponent("id,name,parents")}`,
+    );
+    if (!res || !res.ok) break;
+    const f = (await res.json()) as { id: string; name: string; parents?: string[] };
+    crumbs.unshift({ id: f.id, name: f.name });
+    if (stopFolderId && f.id === stopFolderId) break;
+    currId = f.parents?.[0] ?? null;
+    if (!currId || (stopFolderId && currId === stopFolderId)) {
+      if (currId && stopFolderId && currId === stopFolderId) {
+        const stopRes = await driveFetch(
+          env,
+          `/drive/v3/files/${encodeURIComponent(stopFolderId)}?fields=${encodeURIComponent("id,name")}`,
+        );
+        if (stopRes && stopRes.ok) {
+          const stopF = (await stopRes.json()) as { id: string; name: string };
+          crumbs.unshift({ id: stopF.id, name: stopF.name });
+        }
+      }
+      break;
+    }
+  }
+
+  return crumbs;
+}
+
+export async function syncFolderRecursive(
+  env: Env,
+  folderId: string,
+  archiveParentId: string,
+): Promise<number> {
+  let count = 0;
+
+  const meta = await driveFetch(
+    env,
+    `/drive/v3/files/${encodeURIComponent(folderId)}?fields=${encodeURIComponent("id,parents")}`,
+  );
+  if (meta && meta.ok) {
+    const metaBody = (await meta.json()) as { parents?: string[] };
+    const removeParents = (metaBody.parents ?? []).filter((p) => p !== archiveParentId).join(",");
+    const query = new URLSearchParams({ addParents: archiveParentId });
+    if (removeParents) query.set("removeParents", removeParents);
+
+    await driveFetch(
+      env,
+      `/drive/v3/files/${encodeURIComponent(folderId)}?${query.toString()}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ properties: { syncStatus: null } }),
+      },
+    );
+    count++;
+  }
+
+  async function clearFolderItems(parent: string): Promise<void> {
+    const response = await driveFetch(
+      env,
+      `/drive/v3/files?q=${encodeURIComponent(
+        `'${escapeDriveQuery(parent)}' in parents and trashed = false`,
+      )}&fields=${encodeURIComponent("files(id,mimeType,properties)")}&pageSize=100`,
+    );
+    if (!response || !response.ok) return;
+    const body = (await response.json()) as { files?: { id: string; mimeType: string; properties?: Record<string, string> }[] };
+    const items = body.files ?? [];
+
+    for (const item of items) {
+      if (item.properties?.["syncStatus"]) {
+        await driveFetch(
+          env,
+          `/drive/v3/files/${encodeURIComponent(item.id)}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ properties: { syncStatus: null } }),
+          },
+        );
+        count++;
+      }
+      if (item.mimeType === "application/vnd.google-apps.folder") {
+        await clearFolderItems(item.id);
+      }
+    }
+  }
+
+  await clearFolderItems(folderId);
+  return count;
 }
 
 /** The exact Drive query for the not-sync filter, per the app contract. */
