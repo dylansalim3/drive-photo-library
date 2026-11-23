@@ -18,6 +18,7 @@ export interface Env {
   APP_PASS?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  DRIVE_ROOT_FOLDER_ID?: string;
 }
 
 export interface PagesContext {

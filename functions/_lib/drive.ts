@@ -3,6 +3,11 @@ import type { Env } from "./types";
 
 export const INBOX_FOLDER = "Travel Inbox";
 export const ARCHIVE_FOLDER = "Travel Archive";
+export const DEFAULT_ROOT_FOLDER_ID = "1XaVTeYnE79682ZTJzi7FYOH3D5siPZTb";
+
+export function getRootFolderId(env: Env): string | undefined {
+  return env.DRIVE_ROOT_FOLDER_ID?.trim() || DEFAULT_ROOT_FOLDER_ID;
+}
 
 export interface DriveTokenRow {
   access_token: string;
@@ -34,10 +39,21 @@ export interface DriveFileOut {
   isImage: boolean;
 }
 
-export function toDriveFile(file: DriveFileRaw, archiveId?: string): DriveFileOut {
+export function toDriveFile(
+  file: DriveFileRaw,
+  archiveId?: string | null,
+  rootId?: string | null,
+): DriveFileOut {
   const raw = file.properties?.["syncStatus"];
   const syncStatus: DriveFileOut["syncStatus"] =
-    raw === "not-sync" ? "not-sync" : raw === "synced" ? "synced" : archiveId && file.parents?.includes(archiveId) ? "synced" : "unknown";
+    raw === "not-sync"
+      ? "not-sync"
+      : raw === "synced"
+        ? "synced"
+        : (archiveId && file.parents?.includes(archiveId)) ||
+            (rootId && file.parents?.includes(rootId))
+          ? "synced"
+          : "unknown";
   return {
     id: file.id,
     name: file.name,
@@ -149,11 +165,17 @@ export async function listDriveFiles(
   );
 }
 
-export async function findFolder(env: Env, name: string): Promise<DriveFileRaw | null> {
+export async function findFolder(
+  env: Env,
+  name: string,
+  parentId?: string | null,
+): Promise<DriveFileRaw | null> {
+  const parentIdTarget = parentId !== undefined ? parentId : getRootFolderId(env);
+  const parentClause = parentIdTarget ? ` and '${escapeDriveQuery(parentIdTarget)}' in parents` : "";
   const response = await driveFetch(
     env,
     `/drive/v3/files?q=${encodeURIComponent(
-      `mimeType = 'application/vnd.google-apps.folder' and name = '${escapeDriveQuery(name)}' and trashed = false`,
+      `mimeType = 'application/vnd.google-apps.folder' and name = '${escapeDriveQuery(name)}' and trashed = false${parentClause}`,
     )}&fields=${encodeURIComponent("files(id,name,parents)")}&pageSize=10`,
   );
   if (!response || !response.ok) return null;
@@ -161,13 +183,25 @@ export async function findFolder(env: Env, name: string): Promise<DriveFileRaw |
   return body.files?.[0] ?? null;
 }
 
-export async function findOrCreateFolder(env: Env, name: string): Promise<string | null> {
-  const existing = await findFolder(env, name);
+export async function findOrCreateFolder(
+  env: Env,
+  name: string,
+  parentId?: string | null,
+): Promise<string | null> {
+  const parentIdTarget = parentId !== undefined ? parentId : getRootFolderId(env);
+  const existing = await findFolder(env, name, parentIdTarget);
   if (existing) return existing.id;
+  const payload: { name: string; mimeType: string; parents?: string[] } = {
+    name,
+    mimeType: "application/vnd.google-apps.folder",
+  };
+  if (parentIdTarget) {
+    payload.parents = [parentIdTarget];
+  }
   const response = await driveFetch(env, "/drive/v3/files", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, mimeType: "application/vnd.google-apps.folder" }),
+    body: JSON.stringify(payload),
   });
   if (!response || !response.ok) return null;
   const body = (await response.json()) as { id?: string };
@@ -188,8 +222,9 @@ export async function listLibrary(
   filter: "all" | "not-sync" | "synced",
   search: string,
 ): Promise<{ files: DriveFileOut[]; inboxId: string | null; archiveId: string | null } | null> {
-  const inbox = await findFolder(env, INBOX_FOLDER);
-  const archive = await findFolder(env, ARCHIVE_FOLDER);
+  const rootId = getRootFolderId(env);
+  const inbox = await findFolder(env, INBOX_FOLDER, rootId);
+  const archive = await findFolder(env, ARCHIVE_FOLDER, rootId);
   const searchClause = search ? ` and name contains '${escapeDriveQuery(search)}'` : "";
 
   if (filter === "not-sync") {
@@ -198,20 +233,44 @@ export async function listLibrary(
       `properties has { key='syncStatus' and value='not-sync' } and trashed = false${searchClause}`,
     );
     if (!files) return null;
-    return { files: files.map((file) => toDriveFile(file, archive?.id)), inboxId: inbox?.id ?? null, archiveId: archive?.id ?? null };
+    return {
+      files: files.map((file) => toDriveFile(file, archive?.id, rootId)),
+      inboxId: inbox?.id ?? null,
+      archiveId: archive?.id ?? null,
+    };
   }
 
   if (filter === "synced") {
-    if (!archive) return { files: [], inboxId: inbox?.id ?? null, archiveId: null };
-    const files = await listFolderFiles(env, archive.id);
-    if (!files) return null;
+    const parts: DriveFileRaw[] = [];
+    if (archive) {
+      const archiveFiles = await listFolderFiles(env, archive.id);
+      if (archiveFiles) parts.push(...archiveFiles);
+    }
+    // Loose media files placed directly in the parent root folder outside this app
+    if (rootId) {
+      const rootFiles = await listFolderFiles(env, rootId);
+      if (rootFiles) {
+        parts.push(...rootFiles.filter((f) => f.properties?.["syncStatus"] !== "not-sync"));
+      }
+    }
+    const seen = new Set<string>();
+    const unique = parts.filter((file) => {
+      if (seen.has(file.id)) return false;
+      seen.add(file.id);
+      return true;
+    });
     const searched = search
-      ? files.filter((file) => file.name.toLowerCase().includes(search.toLowerCase()))
-      : files;
-    return { files: searched.map((file) => toDriveFile(file, archive.id)), inboxId: inbox?.id ?? null, archiveId: archive.id };
+      ? unique.filter((file) => file.name.toLowerCase().includes(search.toLowerCase()))
+      : unique;
+    searched.sort((a, b) => (b.createdTime ?? "").localeCompare(a.createdTime ?? ""));
+    return {
+      files: searched.map((file) => toDriveFile(file, archive?.id, rootId)),
+      inboxId: inbox?.id ?? null,
+      archiveId: archive?.id ?? null,
+    };
   }
 
-  // all: inbox + archive combined, de-duplicated, newest first.
+  // all: inbox + archive + loose files in parent root folder combined, de-duplicated, newest first.
   const parts: DriveFileRaw[] = [];
   if (inbox) {
     const inboxFiles = await listFolderFiles(env, inbox.id);
@@ -222,6 +281,10 @@ export async function listLibrary(
     const archiveFiles = await listFolderFiles(env, archive.id);
     if (!archiveFiles) return null;
     parts.push(...archiveFiles);
+  }
+  if (rootId) {
+    const rootFiles = await listFolderFiles(env, rootId);
+    if (rootFiles) parts.push(...rootFiles);
   }
   const seen = new Set<string>();
   const merged = parts.filter((file) => {
@@ -234,7 +297,7 @@ export async function listLibrary(
     : merged;
   searched.sort((a, b) => (b.createdTime ?? "").localeCompare(a.createdTime ?? ""));
   return {
-    files: searched.map((file) => toDriveFile(file, archive?.id)),
+    files: searched.map((file) => toDriveFile(file, archive?.id, rootId)),
     inboxId: inbox?.id ?? null,
     archiveId: archive?.id ?? null,
   };
