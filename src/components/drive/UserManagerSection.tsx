@@ -4,6 +4,7 @@ import {
   RiUserLine,
   RiDeleteBinLine,
   RiLockPasswordLine,
+  RiShieldKeyholeLine,
 } from "@remixicon/react";
 import { Button } from "@/components/base/buttons/button";
 import { Input } from "@/components/base/input/input";
@@ -13,8 +14,11 @@ import {
   createAppUser,
   deleteAppUser,
   listAppUsers,
+  listSessions,
+  revokeSession,
   type AppUser,
   type AuthStatus,
+  type SessionItem,
 } from "@/api";
 
 interface UserManagerSectionProps {
@@ -42,6 +46,11 @@ export function UserManagerSection({ status }: UserManagerSectionProps) {
   const [confirmPass, setConfirmPass] = useState("");
   const [changingPass, setChangingPass] = useState(false);
 
+  // Active Sessions State
+  const [sessions, setSessions] = useState<SessionItem[]>([]);
+  const [loadingSessions, setLoadingSessions] = useState(false);
+  const [revokingSession, setRevokingSession] = useState(false);
+
   const fetchUsers = async () => {
     setLoading(true);
     try {
@@ -54,9 +63,52 @@ export function UserManagerSection({ status }: UserManagerSectionProps) {
     }
   };
 
+  const fetchSessions = async () => {
+    setLoadingSessions(true);
+    try {
+      const data = await listSessions();
+      setSessions(data);
+    } catch {
+      // ignore
+    } finally {
+      setLoadingSessions(false);
+    }
+  };
+
   useEffect(() => {
     void fetchUsers();
+    void fetchSessions();
   }, []);
+
+  const handleRevokeSession = async (prefix: string) => {
+    setRevokingSession(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      await revokeSession({ tokenHashPrefix: prefix });
+      setSuccess("Session revoked.");
+      await fetchSessions();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to revoke session.");
+    } finally {
+      setRevokingSession(false);
+    }
+  };
+
+  const handleRevokeOthers = async () => {
+    setRevokingSession(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      await revokeSession({ revokeAllOthers: true });
+      setSuccess("All other sessions have been revoked.");
+      await fetchSessions();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to revoke sessions.");
+    } finally {
+      setRevokingSession(false);
+    }
+  };
 
   const handleCreateUser = async (e: FormEvent) => {
     e.preventDefault();
@@ -335,6 +387,75 @@ export function UserManagerSection({ status }: UserManagerSectionProps) {
             </div>
           </form>
         )}
+      </div>
+
+      {/* Active Sessions & Security */}
+      <div className="pt-2 border-t border-border-button-default">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <RiShieldKeyholeLine className="size-4 text-text-primary" />
+            <p className="text-body-2-medium font-semibold text-text-primary">Active Sessions</p>
+          </div>
+          {sessions.filter((s) => !s.isCurrent).length > 0 && (
+            <Button
+              variant="secondary"
+              size="small"
+              disabled={revokingSession}
+              onClick={handleRevokeOthers}
+            >
+              Revoke other sessions
+            </Button>
+          )}
+        </div>
+        <div className="mt-2.5 flex flex-col gap-2">
+          {loadingSessions ? (
+            <p className="text-caption-1-regular text-text-secondary py-1">Loading sessions…</p>
+          ) : sessions.length === 0 ? (
+            <p className="text-caption-1-regular text-text-secondary py-1">No active sessions found.</p>
+          ) : (
+            sessions.map((s) => {
+              const expiresDate = new Date(s.expiresAt * 1000).toLocaleDateString(undefined, {
+                month: "short",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              });
+              return (
+                <div
+                  key={s.tokenHashPrefix}
+                  className="flex items-center justify-between rounded-xl border border-border-button-default bg-background-secondary-default p-2.5 text-start"
+                >
+                  <div className="min-w-0 pr-2">
+                    <div className="flex items-center gap-2">
+                      <p className="text-caption-1-medium font-semibold text-text-primary font-mono">
+                        session-{s.tokenHashPrefix}
+                      </p>
+                      {s.isCurrent ? (
+                        <Chip variant="caption" color="lime">Current</Chip>
+                      ) : (
+                        <Chip variant="caption" color="soft">@{s.username}</Chip>
+                      )}
+                    </div>
+                    <p className="text-caption-2-regular text-text-secondary mt-0.5">
+                      Expires {expiresDate}
+                    </p>
+                  </div>
+                  {!s.isCurrent && (
+                    <Button
+                      variant="ghost"
+                      size="small"
+                      disabled={revokingSession}
+                      onClick={() => handleRevokeSession(s.tokenHashPrefix)}
+                      className="text-text-secondary hover:text-rose-500"
+                    >
+                      Revoke
+                    </Button>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
       </div>
     </div>
   );

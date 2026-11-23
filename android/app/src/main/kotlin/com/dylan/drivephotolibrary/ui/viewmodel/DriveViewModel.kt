@@ -6,12 +6,18 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.dylan.drivephotolibrary.data.model.AppUser
 import com.dylan.drivephotolibrary.data.model.AuthStatus
 import com.dylan.drivephotolibrary.data.model.Breadcrumb
+import com.dylan.drivephotolibrary.data.model.DriveConfigResponse
 import com.dylan.drivephotolibrary.data.model.DriveFile
 import com.dylan.drivephotolibrary.data.model.DriveFolder
+import com.dylan.drivephotolibrary.data.model.SessionItem
+import com.dylan.drivephotolibrary.data.model.StorageBreakdown
 import com.dylan.drivephotolibrary.data.model.TreeItem
 import com.dylan.drivephotolibrary.data.repository.DriveRepository
+import com.dylan.drivephotolibrary.data.upload.ResumableUploader
+import com.dylan.drivephotolibrary.data.upload.UploadWorker
 import com.dylan.drivephotolibrary.data.util.ZipDownloader
 import com.dylan.drivephotolibrary.ui.util.Formatters
 import kotlinx.coroutines.Job
@@ -23,7 +29,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 enum class ViewMode {
-    GRID, LIST
+    GRID, LIST, MAP
 }
 
 enum class SortOption(val label: String) {
@@ -51,6 +57,13 @@ data class MediaDateGroup(
     val dateLabel: String,
     val files: List<DriveFile>,
     val startIndex: Int
+)
+
+data class UploadItemProgress(
+    val fileName: String,
+    val percent: Int,
+    val uploadedBytes: Long,
+    val totalBytes: Long
 )
 
 fun groupFilesByDate(files: List<DriveFile>): List<MediaDateGroup> {
@@ -101,7 +114,22 @@ data class DriveUiState(
     val isDownloadingZip: Boolean = false,
     val showZipProgressDialog: Boolean = false,
     val zipDownloadProgress: ZipDownloader.Progress? = null,
-    val isSyncingAll: Boolean = false
+    val isSyncingAll: Boolean = false,
+    // Phase 2: Multi-User Collaboration & External Drive Sharing
+    val showUserManagementSheet: Boolean = false,
+    val users: List<AppUser> = emptyList(),
+    val isLoadingUsers: Boolean = false,
+    val sessions: List<SessionItem> = emptyList(),
+    val isLoadingSessions: Boolean = false,
+    val showSharedDriveConfigSheet: Boolean = false,
+    val driveConfig: DriveConfigResponse? = null,
+    val isLoadingDriveConfig: Boolean = false,
+    // Phase 3: Resumable Uploads & Background Queue
+    val uploadProgress: UploadItemProgress? = null,
+    // Phase 5: Soft Delete, Trash & Storage Breakdown
+    val storageBreakdown: StorageBreakdown? = null,
+    val isLoadingStorage: Boolean = false,
+    val isTrashing: Boolean = false
 ) {
     val uploaders: List<String>
         get() = files.mapNotNull { it.uploadedBy }.distinct()
@@ -330,13 +358,14 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
         if (uris.isEmpty()) return
         val currentFolderId = _uiState.value.currentFolderId
         viewModelScope.launch {
-            _uiState.update { it.copy(isUploading = true, uploadNotice = "Uploading ${uris.size} file(s)...") }
+            _uiState.update { it.copy(isUploading = true, uploadNotice = "Starting resumable upload of ${uris.size} file(s)...") }
             val context = getApplication<Application>()
+            val uploader = ResumableUploader(context, repository)
             var uploadedCount = 0
 
             for (uri in uris) {
                 var fileName = "upload_${System.currentTimeMillis()}"
-                val mimeType = context.contentResolver.getType(uri)
+                val mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
 
                 context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
                     val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
@@ -345,20 +374,78 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                repository.uploadUri(uri, fileName, mimeType, currentFolderId).fold(
+                _uiState.update {
+                    it.copy(
+                        uploadNotice = "Uploading $fileName (8MB chunks)...",
+                        uploadProgress = UploadItemProgress(fileName, 0, 0L, 0L)
+                    )
+                }
+
+                val res = uploader.uploadFile(
+                    uri = uri,
+                    fileName = fileName,
+                    mimeType = mimeType,
+                    folderId = currentFolderId
+                ) { uploaded, total, percent ->
+                    _uiState.update {
+                        it.copy(uploadProgress = UploadItemProgress(fileName, percent, uploaded, total))
+                    }
+                }
+
+                res.fold(
                     onSuccess = { uploadedCount++ },
-                    onFailure = { /* continue next */ }
+                    onFailure = { err ->
+                        _uiState.update { it.copy(actionNotice = "Upload failed for $fileName: ${err.message}") }
+                    }
                 )
             }
 
             _uiState.update {
                 it.copy(
                     isUploading = false,
-                    uploadNotice = "Uploaded $uploadedCount of ${uris.size} file(s)"
+                    uploadProgress = null,
+                    uploadNotice = "Uploaded $uploadedCount of ${uris.size} file(s) to staging"
                 )
             }
             loadFiles()
         }
+    }
+
+    fun enqueueBackgroundUpload(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        val context = getApplication<Application>()
+        val workManager = androidx.work.WorkManager.getInstance(context)
+        val currentFolderId = _uiState.value.currentFolderId
+
+        for (uri in uris) {
+            var fileName = "upload_${System.currentTimeMillis()}"
+            val mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
+            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (nameIndex != -1 && cursor.moveToFirst()) {
+                    fileName = cursor.getString(nameIndex) ?: fileName
+                }
+            }
+
+            val uploadWorkRequest = androidx.work.OneTimeWorkRequestBuilder<UploadWorker>()
+                .setInputData(
+                    androidx.work.workDataOf(
+                        UploadWorker.KEY_URI to uri.toString(),
+                        UploadWorker.KEY_FILE_NAME to fileName,
+                        UploadWorker.KEY_MIME_TYPE to mimeType,
+                        UploadWorker.KEY_FOLDER_ID to currentFolderId
+                    )
+                )
+                .setBackoffCriteria(
+                    androidx.work.BackoffPolicy.EXPONENTIAL,
+                    15,
+                    java.util.concurrent.TimeUnit.SECONDS
+                )
+                .build()
+
+            workManager.enqueue(uploadWorkRequest)
+        }
+        _uiState.update { it.copy(uploadNotice = "Queued ${uris.size} background upload(s) with WorkManager") }
     }
 
     fun selectFile(index: Int?) {
@@ -650,6 +737,272 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
             }
             _uiState.update { it.copy(isSyncingAll = false, actionNotice = "All pending items marked as synced") }
             loadFiles()
+        }
+    }
+
+    // Phase 2: Multi-User Management
+    fun openUserManagement() {
+        _uiState.update { it.copy(showUserManagementSheet = true) }
+        loadUsers()
+        loadSessions()
+    }
+
+    fun closeUserManagement() {
+        _uiState.update { it.copy(showUserManagementSheet = false) }
+    }
+
+    fun loadUsers() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingUsers = true) }
+            repository.listUsers().fold(
+                onSuccess = { res ->
+                    _uiState.update { it.copy(isLoadingUsers = false, users = res.users) }
+                },
+                onFailure = { err ->
+                    _uiState.update { it.copy(isLoadingUsers = false, actionNotice = err.message) }
+                }
+            )
+        }
+    }
+
+    fun createUser(username: String, pass: String, role: String, onDone: (Boolean, String?) -> Unit) {
+        viewModelScope.launch {
+            repository.createUser(username, pass, role).fold(
+                onSuccess = {
+                    loadUsers()
+                    onDone(true, null)
+                },
+                onFailure = { err ->
+                    onDone(false, err.message)
+                }
+            )
+        }
+    }
+
+    fun deleteUser(id: Int, onDone: (Boolean, String?) -> Unit) {
+        viewModelScope.launch {
+            repository.deleteUser(id).fold(
+                onSuccess = {
+                    loadUsers()
+                    onDone(true, null)
+                },
+                onFailure = { err ->
+                    onDone(false, err.message)
+                }
+            )
+        }
+    }
+
+    fun changePassword(currentPass: String, newPass: String, onDone: (Boolean, String?) -> Unit) {
+        viewModelScope.launch {
+            repository.changePassword(currentPass, newPass).fold(
+                onSuccess = {
+                    onDone(true, "Password updated successfully")
+                },
+                onFailure = { err ->
+                    onDone(false, err.message)
+                }
+            )
+        }
+    }
+
+    fun loadSessions() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingSessions = true) }
+            repository.listSessions().fold(
+                onSuccess = { res ->
+                    _uiState.update { it.copy(isLoadingSessions = false, sessions = res.sessions) }
+                },
+                onFailure = {
+                    _uiState.update { it.copy(isLoadingSessions = false) }
+                }
+            )
+        }
+    }
+
+    fun revokeSession(prefix: String) {
+        viewModelScope.launch {
+            repository.revokeSession(prefix = prefix).fold(
+                onSuccess = {
+                    loadSessions()
+                    _uiState.update { it.copy(actionNotice = "Session revoked") }
+                },
+                onFailure = { err ->
+                    _uiState.update { it.copy(actionNotice = err.message) }
+                }
+            )
+        }
+    }
+
+    fun revokeOtherSessions() {
+        viewModelScope.launch {
+            repository.revokeSession(revokeAllOthers = true).fold(
+                onSuccess = {
+                    loadSessions()
+                    _uiState.update { it.copy(actionNotice = "All other sessions revoked") }
+                },
+                onFailure = { err ->
+                    _uiState.update { it.copy(actionNotice = err.message) }
+                }
+            )
+        }
+    }
+
+    // Phase 2: Approach A Shared Drive & Folder Routing
+    fun openSharedDriveConfig() {
+        _uiState.update { it.copy(showSharedDriveConfigSheet = true) }
+        loadDriveConfig()
+    }
+
+    fun closeSharedDriveConfig() {
+        _uiState.update { it.copy(showSharedDriveConfigSheet = false) }
+    }
+
+    fun loadDriveConfig() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingDriveConfig = true) }
+            repository.getDriveConfig().fold(
+                onSuccess = { cfg ->
+                    _uiState.update { it.copy(isLoadingDriveConfig = false, driveConfig = cfg) }
+                },
+                onFailure = { err ->
+                    _uiState.update { it.copy(isLoadingDriveConfig = false, actionNotice = err.message) }
+                }
+            )
+        }
+    }
+
+    fun switchRootFolder(folderId: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingDriveConfig = true, actionNotice = "Connecting shared folder...") }
+            repository.setSharedRootFolder(folderId).fold(
+                onSuccess = { cfg ->
+                    _uiState.update {
+                        it.copy(
+                            isLoadingDriveConfig = false,
+                            driveConfig = cfg,
+                            currentFolderId = null,
+                            breadcrumbs = emptyList(),
+                            actionNotice = "Connected to shared folder: ${cfg.rootFolderName ?: folderId}"
+                        )
+                    }
+                    checkAuth()
+                    loadFiles()
+                },
+                onFailure = { err ->
+                    _uiState.update { it.copy(isLoadingDriveConfig = false, actionNotice = err.message) }
+                }
+            )
+        }
+    }
+
+    fun resetRootFolderDefault() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingDriveConfig = true, actionNotice = "Resetting root folder...") }
+            repository.resetRootFolder().fold(
+                onSuccess = { cfg ->
+                    _uiState.update {
+                        it.copy(
+                            isLoadingDriveConfig = false,
+                            driveConfig = cfg,
+                            currentFolderId = null,
+                            breadcrumbs = emptyList(),
+                            actionNotice = "Reset root folder to default"
+                        )
+                    }
+                    checkAuth()
+                    loadFiles()
+                },
+                onFailure = { err ->
+                    _uiState.update { it.copy(isLoadingDriveConfig = false, actionNotice = err.message) }
+                }
+            )
+        }
+    }
+
+    // Phase 5: Soft Delete, Trash & Storage Breakdown
+    fun loadStorageBreakdown() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingStorage = true) }
+            repository.getStorageBreakdown().fold(
+                onSuccess = { breakdown ->
+                    _uiState.update { it.copy(isLoadingStorage = false, storageBreakdown = breakdown) }
+                },
+                onFailure = {
+                    _uiState.update { it.copy(isLoadingStorage = false) }
+                }
+            )
+        }
+    }
+
+    fun moveToTrash(fileIds: List<String>, folderIds: List<String>) {
+        if (fileIds.isEmpty() && folderIds.isEmpty()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isTrashing = true, actionNotice = "Moving items to trash...") }
+            repository.moveToTrash(fileIds, folderIds).fold(
+                onSuccess = { res ->
+                    _uiState.update {
+                        it.copy(
+                            isTrashing = false,
+                            selectedFileIds = emptySet(),
+                            selectedFolderIds = emptySet(),
+                            actionNotice = "Moved ${res.count} items to trash"
+                        )
+                    }
+                    loadFiles()
+                    loadStorageBreakdown()
+                },
+                onFailure = { err ->
+                    _uiState.update { it.copy(isTrashing = false, actionNotice = err.message ?: "Failed to move to trash") }
+                }
+            )
+        }
+    }
+
+    fun restoreFromTrash(fileIds: List<String>, folderIds: List<String>) {
+        if (fileIds.isEmpty() && folderIds.isEmpty()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isTrashing = true, actionNotice = "Restoring items from trash...") }
+            repository.restoreFromTrash(fileIds, folderIds).fold(
+                onSuccess = { res ->
+                    _uiState.update {
+                        it.copy(
+                            isTrashing = false,
+                            selectedFileIds = emptySet(),
+                            selectedFolderIds = emptySet(),
+                            actionNotice = "Restored ${res.count} items from trash"
+                        )
+                    }
+                    loadFiles()
+                    loadStorageBreakdown()
+                },
+                onFailure = { err ->
+                    _uiState.update { it.copy(isTrashing = false, actionNotice = err.message ?: "Failed to restore from trash") }
+                }
+            )
+        }
+    }
+
+    fun emptyTrash(olderThanDays: Int? = null) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isTrashing = true, actionNotice = "Emptying trash...") }
+            repository.emptyTrash(olderThanDays).fold(
+                onSuccess = { res ->
+                    _uiState.update {
+                        it.copy(
+                            isTrashing = false,
+                            selectedFileIds = emptySet(),
+                            selectedFolderIds = emptySet(),
+                            actionNotice = "Permanently deleted ${res.deletedCount} items"
+                        )
+                    }
+                    loadFiles()
+                    loadStorageBreakdown()
+                },
+                onFailure = { err ->
+                    _uiState.update { it.copy(isTrashing = false, actionNotice = err.message ?: "Failed to empty trash") }
+                }
+            )
         }
     }
 }

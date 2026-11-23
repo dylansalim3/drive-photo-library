@@ -248,6 +248,7 @@ fun MediaSortFilterBar(
                     listOf(
                         "not-sync" to "Pending (Not-sync)",
                         "synced" to "Synced only",
+                        "trash" to "Trash",
                         "all" to "All files"
                     ).forEach { (key, label) ->
                         DropdownMenuItem(

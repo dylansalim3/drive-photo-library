@@ -32,10 +32,10 @@ Comprehensive roadmap and feature tracking for **Drive Photo Library (DPL)**, in
 
 ---
 
-## 👥 Phase 2: Multi-User Collaboration & External Drive Sharing
+## 👥 Phase 2: Multi-User Collaboration & External Drive Sharing (Completed ✅)
 
-- [ ] **Cloudflare D1 Multi-User Accounts**:
-  - [ ] Create database migration for `users` table:
+- [x] **Cloudflare D1 Multi-User Accounts**:
+  - [x] Create database migration for `users` table:
     ```sql
     CREATE TABLE users (
       id TEXT PRIMARY KEY,
@@ -46,62 +46,66 @@ Comprehensive roadmap and feature tracking for **Drive Photo Library (DPL)**, in
       created_at INTEGER NOT NULL
     );
     ```
-  - [ ] Migrate authentication endpoint `POST /api/auth/login` to query `users` table with Web Crypto PBKDF2/argon2 password hashing.
-  - [ ] Admin User Management UI in Web & Android:
-    - [ ] Create/invite new user accounts directly from app settings.
-    - [ ] Password reset / change password workflow.
-    - [ ] List active sessions and revoke access.
-- [ ] **Approach A: External Shared Drive & Folder Routing**:
-  - [ ] Support selecting and switching between different shared root folders or Shared Drives (Workspace).
-  - [ ] Clear setup documentation for family/friends to share folders with Editor permissions to the central server account.
-- [ ] **Per-User Media Attribution & Filtering**:
+  - [x] Migrate authentication endpoint `POST /api/auth/login` to query `users` table with Web Crypto PBKDF2/argon2 password hashing.
+  - [x] Admin User Management UI in Web & Android:
+    - [x] Create/invite new user accounts directly from app settings.
+    - [x] Password reset / change password workflow.
+    - [x] List active sessions and revoke access.
+- [x] **Approach A: External Shared Drive & Folder Routing**:
+  - [x] Support selecting and switching between different shared root folders or Shared Drives (Workspace).
+  - [x] Clear setup documentation for family/friends to share folders with Editor permissions to the central server account (`docs/APPROACH_A_SETUP.md`).
+- [x] **Per-User Media Attribution & Filtering**:
   - [x] Web & Android uploader filter chip (`@alice`, `@bob`, `@dylan`).
   - [x] Stamping `uploadedBy` Drive public property on new uploads.
-  - [ ] Uploader avatar pills on media thumbnails and details sheet.
+  - [x] Uploader avatar pills on media thumbnails and details sheet.
 
 ---
 
-## ⚡ Phase 3: Resumable Uploads & Large File Support
+## ⚡ Phase 3: Resumable Uploads & Large File Support (Completed ✅)
 
-- [ ] **Direct Google Drive Resumable Upload Protocol**:
-  - [ ] Problem: Cloudflare Pages Functions free tier has a 100MB body limit per request, preventing uploads of large 4K video clips.
-  - [ ] Server endpoint `POST /api/upload/init`: Server initiates a Google Drive resumable session with Google's API and returns the signed `location` URI.
-  - [ ] Client chunked uploader: Web and Android clients chunk large files (e.g., in 8MB chunks) and upload directly to Google's resumable endpoint or through a streaming proxy.
-  - [ ] Pause / Resume support on flaky hotel, airport, or cellular networks.
-- [ ] **Background Upload Queue**:
-  - [ ] Android WorkManager support for reliable background uploads when the app is minimized.
-  - [ ] Retry policies with exponential backoff on connection drops.
-
----
-
-## 🗺️ Phase 4: EXIF Metadata & Travel Map Explorer
-
-- [ ] **EXIF Extraction**:
-  - [ ] Serverless or client-side EXIF reader (camera model, lens, aperture, shutter speed, ISO).
-  - [ ] GPS coordinates extraction (`latitude`, `longitude`, `altitude`).
-  - [ ] Display formatted EXIF specs in the fullscreen media lightbox.
-- [ ] **Interactive Travel Map View**:
-  - [ ] Map tab or toggle in gallery.
-  - [ ] Marker clustering showing where photos were taken during a trip.
-  - [ ] Tap cluster to filter gallery to that location.
+- [x] **Direct Google Drive Resumable Upload Protocol**:
+  - [x] Overcome Cloudflare Pages 100MB body limit: Server initiates direct Google Drive resumable session with Google's API (`uploadType=resumable`).
+  - [x] Server endpoint `POST /api/upload/init`: Server initiates a Google Drive resumable session with Google's API and returns the signed `location` URI.
+  - [x] Client chunked uploader: Web (`ChunkedUploader.ts`) and Android (`ResumableUploader.kt`) chunk large files in 8MB slices with `Content-Range: bytes start-end/total`.
+  - [x] Pause / Resume support on flaky hotel, airport, or cellular networks querying byte offset via `Content-Range: bytes */total`.
+- [x] **Background Upload Queue**:
+  - [x] Android WorkManager support (`UploadWorker.kt`) for reliable background uploads when the app is minimized.
+  - [x] Retry policies with exponential backoff on connection drops (`BackoffPolicy.EXPONENTIAL`).
 
 ---
 
-## 🗑️ Phase 5: Soft Delete, Trash & Data Management
+## 🗺️ Phase 4: EXIF Metadata & Travel Map Explorer (Completed ✅)
 
-- [ ] **Safe Trash Workflow**:
-  - [ ] Avoid irreversible permanent deletions from mobile.
-  - [ ] Moving items to a dedicated `Travel Trash` folder with `syncStatus = 'trash'`.
-  - [ ] Trash view with "Restore" and "Empty Trash" actions.
-  - [ ] Optional 30-day auto-purge policy.
-- [ ] **Storage Usage Breakdown**:
-  - [ ] In-app storage meter showing Drive quota, staging folder size, and archive size.
+- [x] **EXIF Extraction**:
+  - [x] Serverless or client-side EXIF reader (camera model, lens, aperture, shutter speed, ISO).
+  - [x] GPS coordinates extraction (`latitude`, `longitude`, `altitude`).
+  - [x] Display formatted EXIF specs in the fullscreen media lightbox.
+- [x] **Interactive Travel Map View**:
+  - [x] Map tab or toggle in gallery.
+  - [x] Marker clustering showing where photos were taken during a trip.
+  - [x] Tap cluster to filter gallery to that location.
 
 ---
 
-## 🖥️ Phase 6: Desktop Ingestion & Automation
+## 🗑️ Phase 5: Soft Delete, Trash & Data Management (Completed ✅)
 
-- [ ] **Desktop Companion CLI / Sync Script**:
-  - [ ] Lightweight Python / Go script or rclone wrapper that fetches `/api/tree?filter=not-sync`.
-  - [ ] Automatically downloads new vacation photos to home NAS/hard drive upon arriving home and hitting local Wi-Fi.
-  - [ ] Automatically triggers `/api/files/:id/mark-synced` upon verified local checksum match.
+- [x] **Safe Trash Workflow**:
+  - [x] Avoid irreversible permanent deletions from mobile.
+  - [x] Moving items to a dedicated `Travel Trash` folder with `syncStatus = 'trash'`.
+  - [x] Trash view with "Restore" and "Empty Trash" actions.
+  - [x] Multi-item trash and restore in Web & Android floating selection bars.
+  - [x] Single-item trash and restore buttons in fullscreen media lightbox.
+- [x] **Storage Usage Breakdown**:
+  - [x] In-app storage meter showing Drive quota, staging folder size, and archive size (`GET /api/storage`).
+  - [x] Web `StorageUsageMeter` component and Android `VacationSyncBottomSheet` storage card with real-time breakdown progress bar.
+
+---
+
+## 🖥️ Phase 6: Desktop Ingestion & Automation (Completed ✅)
+
+- [x] **Desktop Companion CLI / Sync Script**:
+  - [x] Lightweight Python CLI script (`scripts/desktop_sync.py`) with zero external dependencies fetching `/api/tree?filter=not-sync`.
+  - [x] Automatically downloads new vacation photos to home NAS/hard drive upon arriving home and hitting local Wi-Fi.
+  - [x] Preserves hierarchical folder structure and verifies byte integrity via atomic `.dpl_part` downloads.
+  - [x] Automatically triggers `/api/files/:id/mark-synced` upon verified download to move items to `Travel Archive`.
+  - [x] Setup and automation guides (`docs/DESKTOP_SYNC.md`) for Synology NAS, TrueNAS, Linux/macOS Cron, and systemd.

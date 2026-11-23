@@ -5,6 +5,7 @@ import {
   RiGridLine,
   RiListCheck,
   RiLogoutBoxLine,
+  RiMapPinLine,
   RiSearchLine,
   RiSettings3Line,
 } from "@remixicon/react";
@@ -16,8 +17,8 @@ export interface DriveHeaderProps {
   username?: string;
   search: string;
   onSearchChange: (search: string) => void;
-  viewMode: "grid" | "list";
-  onViewModeChange: (mode: "grid" | "list") => void;
+  viewMode: "grid" | "list" | "map";
+  onViewModeChange: (mode: "grid" | "list" | "map") => void;
   onOpenSettings: () => void;
   onSignOut: () => void;
   onOpenSync?: () => void;
@@ -108,6 +109,20 @@ export function DriveHeader({
               )}
             >
               <RiListCheck className="size-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => onViewModeChange("map")}
+              title="Travel Map view"
+              aria-label="Travel Map view"
+              className={cx(
+                "flex size-9 items-center justify-center rounded-lg transition-all outline-none",
+                viewMode === "map"
+                  ? "bg-background-primary-default text-accent-500 shadow-xs font-semibold"
+                  : "text-text-secondary hover:text-text-primary",
+              )}
+            >
+              <RiMapPinLine className="size-4" />
             </button>
           </div>
 

@@ -1,4 +1,31 @@
-export type Filter = "all" | "not-sync" | "synced";
+export type Filter = "all" | "not-sync" | "synced" | "trash";
+
+export interface ImageMediaMetadata {
+  width?: number;
+  height?: number;
+  rotation?: number;
+  location?: {
+    latitude?: number;
+    longitude?: number;
+    altitude?: number;
+  };
+  time?: string;
+  cameraMake?: string;
+  cameraModel?: string;
+  exposureTime?: number;
+  aperture?: number;
+  focalLength?: number;
+  isoSpeed?: number;
+  lens?: string;
+  exposureBias?: number;
+  flashUsed?: boolean;
+}
+
+export interface VideoMediaMetadata {
+  width?: number;
+  height?: number;
+  durationMillis?: string;
+}
 
 export interface DriveFile {
   id: string;
@@ -7,10 +34,12 @@ export interface DriveFile {
   size?: string;
   createdTime?: string;
   modifiedTime?: string;
-  syncStatus: "not-sync" | "synced" | "unknown";
+  syncStatus: "not-sync" | "synced" | "trash" | "unknown";
   uploadedBy?: string;
   isVideo: boolean;
   isImage: boolean;
+  imageMediaMetadata?: ImageMediaMetadata;
+  videoMediaMetadata?: VideoMediaMetadata;
 }
 
 export interface AuthStatus {
@@ -319,3 +348,100 @@ export async function getFileTree(options?: {
   const qs = params.toString();
   return request<TreeResponse>(`/api/tree${qs ? `?${qs}` : ""}`);
 }
+
+export interface SessionItem {
+  tokenHashPrefix: string;
+  username: string;
+  expiresAt: number;
+  isCurrent: boolean;
+}
+
+export async function listSessions(): Promise<SessionItem[]> {
+  const res = await request<{ ok: boolean; sessions: SessionItem[] }>("/api/sessions");
+  return res.sessions;
+}
+
+export async function revokeSession(options: {
+  tokenHashPrefix?: string;
+  revokeAllOthers?: boolean;
+  username?: string;
+}): Promise<{ ok: boolean; message: string }> {
+  return request<{ ok: boolean; message: string }>("/api/sessions/revoke", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(options),
+  });
+}
+
+export interface InitUploadParams {
+  fileName: string;
+  mimeType: string;
+  size?: number;
+  folderId?: string;
+  folderPath?: string;
+}
+
+export interface InitUploadResponse {
+  ok: boolean;
+  uploadUrl: string;
+  targetFolderId: string;
+}
+
+export async function initResumableUpload(params: InitUploadParams): Promise<InitUploadResponse> {
+  return request<InitUploadResponse>("/api/upload/init", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+}
+
+export interface StorageBreakdown {
+  ok: boolean;
+  limit?: string;
+  usage?: string;
+  usageInDrive?: string;
+  usageInDriveTrash?: string;
+  usagePercent?: number;
+  stagingSize: number;
+  stagingCount: number;
+  archiveSize: number;
+  archiveCount: number;
+  trashSize: number;
+  trashCount: number;
+}
+
+export async function getStorageBreakdown(): Promise<StorageBreakdown> {
+  return request<StorageBreakdown>("/api/storage");
+}
+
+export async function moveToTrash(
+  fileIds: string[],
+  folderIds?: string[],
+): Promise<{ ok: boolean; count: number; total: number }> {
+  return request<{ ok: boolean; count: number; total: number }>("/api/trash", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fileIds, folderIds }),
+  });
+}
+
+export async function restoreFromTrash(
+  fileIds: string[],
+  folderIds?: string[],
+): Promise<{ ok: boolean; count: number; total: number }> {
+  return request<{ ok: boolean; count: number; total: number }>("/api/trash/restore", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fileIds, folderIds }),
+  });
+}
+
+export async function emptyTrash(olderThanDays?: number): Promise<{ ok: boolean; deletedCount: number }> {
+  return request<{ ok: boolean; deletedCount: number }>("/api/trash/empty", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ olderThanDays }),
+  });
+}
+
+

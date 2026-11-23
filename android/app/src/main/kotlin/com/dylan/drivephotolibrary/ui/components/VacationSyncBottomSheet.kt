@@ -19,6 +19,8 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -43,7 +45,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.dylan.drivephotolibrary.data.model.StorageBreakdown
 import com.dylan.drivephotolibrary.data.util.ZipDownloader
+import com.dylan.drivephotolibrary.ui.util.Formatters
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -56,7 +60,9 @@ fun VacationSyncBottomSheet(
     isSyncingAll: Boolean,
     onDownloadAllZip: () -> Unit,
     onDownloadManifest: () -> Unit,
-    onMarkAllSynced: () -> Unit
+    onMarkAllSynced: () -> Unit,
+    storageBreakdown: StorageBreakdown? = null,
+    onEmptyTrash: (() -> Unit)? = null
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
@@ -143,6 +149,117 @@ fun VacationSyncBottomSheet(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+                }
+            }
+
+            // Storage Breakdown Card
+            if (storageBreakdown != null) {
+                Spacer(modifier = Modifier.height(14.dp))
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Storage,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = "Google Drive Storage",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            Text(
+                                text = "${storageBreakdown.usagePercent ?: 0f}%",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        val percent = (storageBreakdown.usagePercent ?: 0f) / 100f
+                        LinearProgressIndicator(
+                            progress = { percent.coerceIn(0.02f, 1f) },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "${Formatters.formatBytes(storageBreakdown.usage)} of ${Formatters.formatBytes(storageBreakdown.limit)} used",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Staging pill
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Column(modifier = Modifier.padding(8.dp)) {
+                                    Text("STAGING", style = MaterialTheme.typography.labelSmall, fontSize = 9.sp, color = MaterialTheme.colorScheme.outline)
+                                    Text(Formatters.formatBytes(storageBreakdown.stagingSize.toString()), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                    Text("${storageBreakdown.stagingCount} items", style = MaterialTheme.typography.bodySmall, fontSize = 10.sp)
+                                }
+                            }
+                            // Archive pill
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Column(modifier = Modifier.padding(8.dp)) {
+                                    Text("ARCHIVE", style = MaterialTheme.typography.labelSmall, fontSize = 9.sp, color = MaterialTheme.colorScheme.outline)
+                                    Text(Formatters.formatBytes(storageBreakdown.archiveSize.toString()), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                    Text("${storageBreakdown.archiveCount} items", style = MaterialTheme.typography.bodySmall, fontSize = 10.sp)
+                                }
+                            }
+                            // Trash pill
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Column(modifier = Modifier.padding(8.dp)) {
+                                    Text("TRASH", style = MaterialTheme.typography.labelSmall, fontSize = 9.sp, color = Color(0xFFEF4444))
+                                    Text(Formatters.formatBytes(storageBreakdown.trashSize.toString()), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                    Text("${storageBreakdown.trashCount} items", style = MaterialTheme.typography.bodySmall, fontSize = 10.sp)
+                                }
+                            }
+                        }
+
+                        if (storageBreakdown.trashCount > 0 && onEmptyTrash != null) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            OutlinedButton(
+                                onClick = onEmptyTrash,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(imageVector = Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Empty Trash (${storageBreakdown.trashCount} items)")
+                            }
+                        }
                     }
                 }
             }

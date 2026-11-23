@@ -308,26 +308,41 @@ fun MediaGridItem(
                     .padding(horizontal = 8.dp, vertical = 8.dp)
             ) {
                 Column {
-                    Text(
-                        text = file.name,
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = file.name,
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (!file.uploadedBy.isNullOrBlank()) {
+                            UploaderAvatarPill(
+                                username = file.uploadedBy,
+                                size = PillSize.XSMALL,
+                                modifier = Modifier.padding(start = 4.dp)
+                            )
+                        }
+                    }
                     val meta = listOfNotNull(
                         Formatters.formatBytes(file.size).ifBlank { null },
-                        Formatters.formatDate(file.createdTime ?: file.modifiedTime).ifBlank { null },
-                        file.uploadedBy?.let { "@$it" }
+                        Formatters.formatDate(file.createdTime ?: file.modifiedTime).ifBlank { null }
                     ).joinToString(" • ")
-                    Text(
-                        text = meta,
-                        color = Color(0xCCFFFFFF),
-                        fontSize = 10.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    if (meta.isNotBlank()) {
+                        Text(
+                            text = meta,
+                            color = Color(0xCCFFFFFF),
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
         }

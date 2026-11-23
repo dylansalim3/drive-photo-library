@@ -8,6 +8,7 @@ import {
   listFolderFiles,
   listSubfolders,
   toDriveFile,
+  TRASH_FOLDER,
 } from "../_lib/drive";
 import { errorResponse, jsonResponse, requireSession } from "../_lib/http";
 import type { Breadcrumb, DriveFolderOut, PagesContext } from "../_lib/types";
@@ -22,16 +23,30 @@ export async function onRequestGet(context: PagesContext): Promise<Response> {
 
   const url = new URL(context.request.url);
   const rawFilter = url.searchParams.get("filter") ?? "not-sync";
-  const filter = rawFilter === "all" || rawFilter === "synced" ? rawFilter : "not-sync";
+  const filter =
+    rawFilter === "all" || rawFilter === "synced" || rawFilter === "trash"
+      ? rawFilter
+      : "not-sync";
   const search = url.searchParams.get("search") ?? "";
   const requestedFolderId = url.searchParams.get("folderId")?.trim();
 
   const rootParentId = await getRootFolderId(context.env);
   const inbox = await findOrCreateFolder(context.env, INBOX_FOLDER, rootParentId, null);
   const archive = await findOrCreateFolder(context.env, ARCHIVE_FOLDER, rootParentId, null);
+  const trash = await findOrCreateFolder(context.env, TRASH_FOLDER, rootParentId, "trash");
 
-  const defaultRootId = filter === "synced" ? (archive ?? inbox) : inbox;
-  const defaultRootName = filter === "synced" ? ARCHIVE_FOLDER : INBOX_FOLDER;
+  const defaultRootId =
+    filter === "trash"
+      ? (trash ?? inbox)
+      : filter === "synced"
+        ? (archive ?? inbox)
+        : inbox;
+  const defaultRootName =
+    filter === "trash"
+      ? TRASH_FOLDER
+      : filter === "synced"
+        ? ARCHIVE_FOLDER
+        : INBOX_FOLDER;
 
   const currentFolderId = requestedFolderId || defaultRootId;
   if (!currentFolderId) {
@@ -50,19 +65,21 @@ export async function onRequestGet(context: PagesContext): Promise<Response> {
     }
   }
 
-  const rawSubfolders = (await listSubfolders(context.env, currentFolderId)) ?? [];
+  const rawSubfolders = (await listSubfolders(context.env, currentFolderId, filter === "trash")) ?? [];
   const subfolders: DriveFolderOut[] = search
     ? rawSubfolders.filter((f) => f.name.toLowerCase().includes(search.toLowerCase()))
     : rawSubfolders;
 
   const rawFiles = (await listFolderFiles(context.env, currentFolderId)) ?? [];
-  const driveFiles = rawFiles.map((file) => toDriveFile(file, archive, rootParentId));
+  const driveFiles = rawFiles.map((file) => toDriveFile(file, archive, rootParentId, trash));
   const filteredFiles =
     filter === "not-sync"
       ? driveFiles.filter((f) => f.syncStatus === "not-sync")
       : filter === "synced"
         ? driveFiles.filter((f) => f.syncStatus === "synced")
-        : driveFiles;
+        : filter === "trash"
+          ? driveFiles.filter((f) => f.syncStatus === "trash")
+          : driveFiles.filter((f) => f.syncStatus !== "trash");
 
   const finalFiles = search
     ? filteredFiles.filter((f) => f.name.toLowerCase().includes(search.toLowerCase()))
@@ -77,6 +94,7 @@ export async function onRequestGet(context: PagesContext): Promise<Response> {
     filter,
     inboxFolder: INBOX_FOLDER,
     archiveFolder: ARCHIVE_FOLDER,
+    trashFolder: TRASH_FOLDER,
     folderReady: true,
   });
 }

@@ -280,7 +280,13 @@ export function MediaSortFilterBar({
             >
               <RiFilter3Line className="size-3.5 text-accent-500" />
               <span className="truncate">
-                {filter === "all" ? "Sync: All" : filter === "not-sync" ? "Not-sync" : "Synced"}
+                {filter === "all"
+                  ? "Sync: All"
+                  : filter === "not-sync"
+                    ? "Not-sync"
+                    : filter === "synced"
+                      ? "Synced"
+                      : "Trash"}
               </span>
               <RiArrowDownSLine className="size-3 text-text-tertiary" />
             </button>
@@ -343,6 +349,25 @@ export function MediaSortFilterBar({
                     <span>Synced</span>
                   </div>
                   {filter === "synced" && <RiCheckLine className="size-4 text-accent-500" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onFilterChange("trash");
+                    setShowSyncDropdown(false);
+                  }}
+                  className={cx(
+                    "flex w-full items-center justify-between rounded-xl px-2.5 py-1.5 text-start transition-colors outline-none",
+                    filter === "trash"
+                      ? "bg-background-secondary-default text-rose-500 font-semibold"
+                      : "text-text-primary hover:bg-background-secondary-default",
+                  )}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span className="size-2 rounded-full bg-rose-400" />
+                    <span>Trash</span>
+                  </div>
+                  {filter === "trash" && <RiCheckLine className="size-4 text-rose-500" />}
                 </button>
               </div>
             )}

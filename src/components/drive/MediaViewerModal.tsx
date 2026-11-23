@@ -2,15 +2,36 @@ import { useEffect, useRef, useState, type TouchEvent } from "react";
 import {
   RiArrowLeftSLine,
   RiArrowRightSLine,
+  RiCameraLine,
   RiCheckLine,
   RiCloseLine,
+  RiCompass3Line,
+  RiDeleteBinLine,
   RiDownloadLine,
+  RiExternalLinkLine,
   RiFolderLine,
   RiImageLine,
+  RiInformationLine,
+  RiMapPinLine,
+  RiRefreshLine,
   RiVideoLine,
 } from "@remixicon/react";
 import { formatBytes, formatDate, type DriveFile } from "@/api";
 import { cx } from "@/utils/cx";
+import {
+  formatAltitude,
+  formatAperture,
+  formatCamera,
+  formatCoordinates,
+  formatDuration,
+  formatExposureTime,
+  formatFocalLength,
+  formatIso,
+  formatResolution,
+  getGoogleMapsUrl,
+  getOpenStreetMapUrl,
+} from "@/utils/exifFormatter";
+import { UploaderAvatarPill } from "./UploaderAvatarPill";
 
 export interface MediaViewerModalProps {
   files: DriveFile[];
@@ -20,6 +41,8 @@ export interface MediaViewerModalProps {
   onDownload: (file: DriveFile) => void;
   onMarkSynced?: (fileId: string) => Promise<void>;
   marking?: boolean;
+  onTrash?: (fileId: string) => Promise<void>;
+  onRestore?: (fileId: string) => Promise<void>;
 }
 
 export function MediaViewerModal({
@@ -30,15 +53,18 @@ export function MediaViewerModal({
   onDownload,
   onMarkSynced,
   marking,
+  onTrash,
+  onRestore,
 }: MediaViewerModalProps) {
   const file = files[currentIndex];
   const total = files.length;
 
   const [loadingMedia, setLoadingMedia] = useState(true);
+  const [showExif, setShowExif] = useState(false);
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const touchEndRef = useRef<{ x: number; y: number } | null>(null);
 
-  // Keyboard navigation: Left/Right arrows, Escape
+  // Keyboard navigation: Left/Right arrows, Escape, 'i' key for EXIF
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "ArrowLeft" && currentIndex > 0) {
@@ -47,6 +73,8 @@ export function MediaViewerModal({
         onNavigate(currentIndex + 1);
       } else if (e.key === "Escape") {
         onClose();
+      } else if (e.key.toLowerCase() === "i") {
+        setShowExif((prev) => !prev);
       }
     };
 
@@ -60,6 +88,26 @@ export function MediaViewerModal({
   }, [file?.id]);
 
   if (!file) return null;
+
+  // EXIF extraction
+  const exif = file.imageMediaMetadata;
+  const videoExif = file.videoMediaMetadata;
+  const camera = formatCamera(exif?.cameraMake, exif?.cameraModel);
+  const lens = exif?.lens?.trim();
+  const exposureTime = formatExposureTime(exif?.exposureTime);
+  const aperture = formatAperture(exif?.aperture);
+  const focalLength = formatFocalLength(exif?.focalLength);
+  const iso = formatIso(exif?.isoSpeed);
+  const resolution = formatResolution(
+    exif?.width ?? videoExif?.width,
+    exif?.height ?? videoExif?.height,
+  );
+  const duration = formatDuration(videoExif?.durationMillis);
+  const coordinates = formatCoordinates(exif?.location?.latitude, exif?.location?.longitude);
+  const altitude = formatAltitude(exif?.location?.altitude);
+  const hasExif = Boolean(
+    camera || lens || exposureTime || aperture || focalLength || iso || coordinates || duration,
+  );
 
   // Touch swipe handling
   const handleTouchStart = (e: TouchEvent) => {
@@ -110,25 +158,49 @@ export function MediaViewerModal({
             {file.isVideo ? <RiVideoLine className="size-4" /> : <RiImageLine className="size-4" />}
           </div>
           <div className="min-w-0">
-            <p className="truncate text-body-medium font-semibold text-white drop-shadow-xs">
-              {file.name}
-            </p>
+            <div className="flex items-center gap-2">
+              <p className="truncate text-body-medium font-semibold text-white drop-shadow-xs">
+                {file.name}
+              </p>
+              {file.uploadedBy && (
+                <UploaderAvatarPill username={file.uploadedBy} size="xs" />
+              )}
+            </div>
             <p className="text-caption-1-regular text-white/70 truncate drop-shadow-xs">
-              {[formatBytes(file.size), formatDate(file.createdTime), file.uploadedBy ? `Uploaded by @${file.uploadedBy}` : null]
+              {[formatBytes(file.size), formatDate(file.createdTime)]
                 .filter(Boolean)
                 .join(" · ")}
             </p>
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close viewer"
-          className="flex size-10 shrink-0 items-center justify-center rounded-full bg-white/10 backdrop-blur-md border border-white/20 text-white/90 hover:bg-white/20 hover:text-white transition-colors outline-none focus-visible:ring-2 focus-visible:ring-white"
-        >
-          <RiCloseLine className="size-5" />
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Info / EXIF Toggle Button */}
+          <button
+            type="button"
+            onClick={() => setShowExif((prev) => !prev)}
+            aria-label="Toggle metadata and EXIF inspector"
+            title="EXIF info & location (I)"
+            className={cx(
+              "flex size-10 shrink-0 items-center justify-center rounded-full backdrop-blur-md border border-white/20 transition-all outline-none focus-visible:ring-2 focus-visible:ring-white",
+              showExif
+                ? "bg-accent-500 text-white shadow-lg ring-2 ring-accent-400"
+                : "bg-white/10 text-white/90 hover:bg-white/20 hover:text-white",
+            )}
+          >
+            <RiInformationLine className="size-5" />
+          </button>
+
+          {/* Close Viewer */}
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close viewer"
+            className="flex size-10 shrink-0 items-center justify-center rounded-full bg-white/10 backdrop-blur-md border border-white/20 text-white/90 hover:bg-white/20 hover:text-white transition-colors outline-none focus-visible:ring-2 focus-visible:ring-white"
+          >
+            <RiCloseLine className="size-5" />
+          </button>
+        </div>
       </div>
 
       {/* Main Media Viewport with Touch Drag */}
@@ -193,6 +265,150 @@ export function MediaViewerModal({
         )}
       </div>
 
+      {/* EXIF Inspector Glass Flyout Sheet */}
+      {showExif && (
+        <div className="absolute right-4 bottom-24 sm:bottom-28 z-30 w-[calc(100%-2rem)] sm:w-96 max-h-[70vh] overflow-y-auto rounded-3xl border border-white/20 bg-black/85 p-5 backdrop-blur-2xl text-white shadow-2xl animate-in slide-in-from-bottom-5 duration-200">
+          <div className="flex items-center justify-between pb-3 border-b border-white/15">
+            <div className="flex items-center gap-2">
+              <RiCameraLine className="size-5 text-accent-400" />
+              <span className="text-body-medium font-semibold">Camera & EXIF Specs</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowExif(false)}
+              className="rounded-full p-1 text-white/60 hover:text-white transition-colors"
+            >
+              <RiCloseLine className="size-4" />
+            </button>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-4 text-caption-1-medium">
+            {/* Camera Model & Lens */}
+            {camera ? (
+              <div>
+                <p className="text-caption-2-medium uppercase tracking-wider text-white/50">Camera</p>
+                <p className="text-body-2-semibold text-white mt-0.5">{camera}</p>
+                {lens && <p className="text-caption-1-regular text-white/70 mt-0.5">{lens}</p>}
+              </div>
+            ) : null}
+
+            {/* Exposure Specs Grid */}
+            {(exposureTime || aperture || focalLength || iso) && (
+              <div>
+                <p className="text-caption-2-medium uppercase tracking-wider text-white/50 mb-1.5">
+                  Exposure
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {exposureTime && (
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-2 text-center">
+                      <p className="text-[11px] text-white/50 uppercase">Shutter</p>
+                      <p className="text-body-2-semibold text-white mt-0.5">{exposureTime}</p>
+                    </div>
+                  )}
+                  {aperture && (
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-2 text-center">
+                      <p className="text-[11px] text-white/50 uppercase">Aperture</p>
+                      <p className="text-body-2-semibold text-white mt-0.5">{aperture}</p>
+                    </div>
+                  )}
+                  {focalLength && (
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-2 text-center">
+                      <p className="text-[11px] text-white/50 uppercase">Focal</p>
+                      <p className="text-body-2-semibold text-white mt-0.5">{focalLength}</p>
+                    </div>
+                  )}
+                  {iso && (
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-2 text-center">
+                      <p className="text-[11px] text-white/50 uppercase">ISO</p>
+                      <p className="text-body-2-semibold text-white mt-0.5">{iso}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* File & Resolution Specs */}
+            <div>
+              <p className="text-caption-2-medium uppercase tracking-wider text-white/50 mb-1.5">
+                Image Details
+              </p>
+              <div className="flex flex-col gap-1.5 rounded-xl border border-white/10 bg-white/5 p-3">
+                {resolution && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-white/60">Resolution</span>
+                    <span className="font-semibold text-white">{resolution}</span>
+                  </div>
+                )}
+                {duration && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-white/60">Duration</span>
+                    <span className="font-semibold text-white">{duration}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between">
+                  <span className="text-white/60">File Size</span>
+                  <span className="font-semibold text-white">{formatBytes(file.size)}</span>
+                </div>
+                {(exif?.time || file.createdTime) && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-white/60">Captured</span>
+                    <span className="font-semibold text-white">
+                      {formatDate(exif?.time || file.createdTime)}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* GPS & Location Specs */}
+            {exif?.location?.latitude != null && exif?.location?.longitude != null && (
+              <div>
+                <p className="text-caption-2-medium uppercase tracking-wider text-white/50 mb-1.5">
+                  Location & GPS
+                </p>
+                <div className="rounded-xl border border-white/10 bg-white/5 p-3 flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <RiMapPinLine className="size-4 text-accent-400 shrink-0" />
+                    <span className="font-semibold text-white">{coordinates}</span>
+                  </div>
+                  {altitude && (
+                    <p className="text-caption-2-regular text-white/70 pl-6">
+                      Altitude: {altitude}
+                    </p>
+                  )}
+                  <div className="flex items-center gap-2 mt-1 pt-2 border-t border-white/10">
+                    <a
+                      href={getGoogleMapsUrl(exif.location.latitude, exif.location.longitude)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-white/10 px-2.5 py-1.5 text-caption-1-medium text-white hover:bg-white/20 transition-colors"
+                    >
+                      <RiExternalLinkLine className="size-3.5" />
+                      <span>Google Maps</span>
+                    </a>
+                    <a
+                      href={getOpenStreetMapUrl(exif.location.latitude, exif.location.longitude)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-white/10 px-2.5 py-1.5 text-caption-1-medium text-white hover:bg-white/20 transition-colors"
+                    >
+                      <RiCompass3Line className="size-3.5" />
+                      <span>OpenStreetMap</span>
+                    </a>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {!hasExif && (
+              <div className="py-4 text-center text-white/60">
+                <p className="text-body-2-regular">No camera EXIF metadata recorded for this file.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Floating iOS/Lenso UI Liquid Glass Bottom Dock */}
       <div className="sticky bottom-0 z-20 flex flex-col items-center justify-center gap-2 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-2">
         <div className="flex items-center gap-2 rounded-full border border-white/20 bg-black/60 px-3.5 py-1.5 backdrop-blur-xl shadow-2xl text-white">
@@ -225,6 +441,20 @@ export function MediaViewerModal({
 
           <span className="h-4 w-px bg-white/20" />
 
+          {/* EXIF Info Action */}
+          <button
+            type="button"
+            onClick={() => setShowExif((prev) => !prev)}
+            title="EXIF info & location"
+            aria-label="EXIF info & location"
+            className={cx(
+              "flex size-8 items-center justify-center rounded-full transition-colors outline-none",
+              showExif ? "text-accent-400 font-bold" : "text-white/80 hover:text-white",
+            )}
+          >
+            <RiInformationLine className="size-4" />
+          </button>
+
           {/* Download Action */}
           <button
             type="button"
@@ -250,6 +480,32 @@ export function MediaViewerModal({
               )}
             >
               <RiCheckLine className="size-4" />
+            </button>
+          )}
+
+          {/* Restore from Trash */}
+          {file.syncStatus === "trash" && onRestore && (
+            <button
+              type="button"
+              onClick={() => void onRestore(file.id)}
+              title="Restore from trash"
+              aria-label="Restore from trash"
+              className="flex size-8 items-center justify-center rounded-full text-white/80 hover:text-emerald-300 transition-colors outline-none"
+            >
+              <RiRefreshLine className="size-4" />
+            </button>
+          )}
+
+          {/* Move to Trash */}
+          {file.syncStatus !== "trash" && onTrash && (
+            <button
+              type="button"
+              onClick={() => void onTrash(file.id)}
+              title="Move to trash"
+              aria-label="Move to trash"
+              className="flex size-8 items-center justify-center rounded-full text-white/80 hover:text-rose-400 transition-colors outline-none"
+            >
+              <RiDeleteBinLine className="size-4" />
             </button>
           )}
         </div>

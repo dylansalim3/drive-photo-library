@@ -7,10 +7,15 @@ import com.dylan.drivephotolibrary.data.model.ActionResponse
 import com.dylan.drivephotolibrary.data.model.AuthStatus
 import com.dylan.drivephotolibrary.data.model.CreateFolderRequest
 import com.dylan.drivephotolibrary.data.model.CreateFolderResponse
+import com.dylan.drivephotolibrary.data.model.CreateUserResponse
+import com.dylan.drivephotolibrary.data.model.DriveConfigResponse
 import com.dylan.drivephotolibrary.data.model.FilesResponse
+import com.dylan.drivephotolibrary.data.model.InitUploadResponse
 import com.dylan.drivephotolibrary.data.model.LoginRequest
 import com.dylan.drivephotolibrary.data.model.LoginResponse
+import com.dylan.drivephotolibrary.data.model.SessionsResponse
 import com.dylan.drivephotolibrary.data.model.TreeResponse
+import com.dylan.drivephotolibrary.data.model.UsersResponse
 import com.dylan.drivephotolibrary.data.network.NetworkModule
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -119,4 +124,135 @@ class DriveRepository(private val context: Context) {
             Result.failure(e)
         }
     }
+
+    // Phase 2: Users Management
+    suspend fun listUsers(): Result<UsersResponse> = withContext(Dispatchers.IO) {
+        try {
+            Result.success(api.listUsers())
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun createUser(username: String, pass: String, role: String): Result<CreateUserResponse> =
+        withContext(Dispatchers.IO) {
+            try {
+                Result.success(api.createUser(com.dylan.drivephotolibrary.data.model.CreateUserRequest(username, pass, role)))
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+
+    suspend fun deleteUser(id: Int): Result<ActionResponse> = withContext(Dispatchers.IO) {
+        try {
+            Result.success(api.deleteUser(id))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun changePassword(currentPass: String, newPass: String): Result<ActionResponse> =
+        withContext(Dispatchers.IO) {
+            try {
+                Result.success(api.changePassword(com.dylan.drivephotolibrary.data.model.ChangePasswordRequest(currentPass, newPass)))
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+
+    // Phase 2: Drive Configuration (Approach A)
+    suspend fun getDriveConfig(): Result<DriveConfigResponse> = withContext(Dispatchers.IO) {
+        try {
+            Result.success(api.getDriveConfig())
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun setSharedRootFolder(folderId: String): Result<DriveConfigResponse> =
+        withContext(Dispatchers.IO) {
+            try {
+                Result.success(api.updateDriveConfig(com.dylan.drivephotolibrary.data.model.SetRootFolderRequest(folderId = folderId)))
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+
+    suspend fun resetRootFolder(): Result<DriveConfigResponse> = withContext(Dispatchers.IO) {
+        try {
+            Result.success(api.updateDriveConfig(com.dylan.drivephotolibrary.data.model.SetRootFolderRequest(resetDefault = true)))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // Phase 2: Session Management
+    suspend fun listSessions(): Result<SessionsResponse> = withContext(Dispatchers.IO) {
+        try {
+            Result.success(api.listSessions())
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun revokeSession(prefix: String? = null, revokeAllOthers: Boolean = false): Result<ActionResponse> =
+        withContext(Dispatchers.IO) {
+            try {
+                Result.success(api.revokeSession(com.dylan.drivephotolibrary.data.model.RevokeSessionRequest(tokenHashPrefix = prefix, revokeAllOthers = revokeAllOthers)))
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+
+    // Phase 3: Resumable Upload
+    suspend fun initUpload(
+        fileName: String,
+        mimeType: String,
+        size: Long? = null,
+        folderId: String? = null,
+        folderPath: String? = null
+    ): Result<InitUploadResponse> = withContext(Dispatchers.IO) {
+        try {
+            Result.success(api.initUpload(com.dylan.drivephotolibrary.data.model.InitUploadRequest(fileName, mimeType, size, folderId, folderPath)))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // Phase 5: Soft Delete, Trash & Storage Breakdown
+    suspend fun moveToTrash(fileIds: List<String>, folderIds: List<String>): Result<com.dylan.drivephotolibrary.data.model.TrashActionResponse> =
+        withContext(Dispatchers.IO) {
+            try {
+                Result.success(api.moveToTrash(com.dylan.drivephotolibrary.data.model.TrashRequest(fileIds, folderIds)))
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+
+    suspend fun restoreFromTrash(fileIds: List<String>, folderIds: List<String>): Result<com.dylan.drivephotolibrary.data.model.TrashActionResponse> =
+        withContext(Dispatchers.IO) {
+            try {
+                Result.success(api.restoreFromTrash(com.dylan.drivephotolibrary.data.model.TrashRequest(fileIds, folderIds)))
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+
+    suspend fun emptyTrash(olderThanDays: Int? = null): Result<com.dylan.drivephotolibrary.data.model.TrashActionResponse> =
+        withContext(Dispatchers.IO) {
+            try {
+                Result.success(api.emptyTrash(com.dylan.drivephotolibrary.data.model.EmptyTrashRequest(olderThanDays)))
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+
+    suspend fun getStorageBreakdown(): Result<com.dylan.drivephotolibrary.data.model.StorageBreakdown> =
+        withContext(Dispatchers.IO) {
+            try {
+                Result.success(api.getStorageBreakdown())
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
 }

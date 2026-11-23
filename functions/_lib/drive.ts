@@ -1,8 +1,9 @@
 import { decryptText, encryptText } from "./crypto";
-import type { Breadcrumb, DriveFolderOut, Env } from "./types";
+import type { Breadcrumb, DriveFolderOut, Env, ImageMediaMetadata, VideoMediaMetadata } from "./types";
 
 export const INBOX_FOLDER = "Travel Inbox";
 export const ARCHIVE_FOLDER = "Travel Archive";
+export const TRASH_FOLDER = "Travel Trash";
 export const DEFAULT_ROOT_FOLDER_ID = "1XaVTeYnE79682ZTJzi7FYOH3D5siPZTb";
 
 export async function getRootFolderId(env: Env): Promise<string | undefined> {
@@ -108,6 +109,8 @@ export interface DriveFileRaw {
   parents?: string[];
   properties?: Record<string, string>;
   thumbnailLink?: string;
+  imageMediaMetadata?: ImageMediaMetadata;
+  videoMediaMetadata?: VideoMediaMetadata;
 }
 
 export interface DriveFileOut {
@@ -117,27 +120,32 @@ export interface DriveFileOut {
   size?: string;
   createdTime?: string;
   modifiedTime?: string;
-  syncStatus: "not-sync" | "synced" | "unknown";
+  syncStatus: "not-sync" | "synced" | "trash" | "unknown";
   uploadedBy?: string;
   isVideo: boolean;
   isImage: boolean;
+  imageMediaMetadata?: ImageMediaMetadata;
+  videoMediaMetadata?: VideoMediaMetadata;
 }
 
 export function toDriveFile(
   file: DriveFileRaw,
   archiveId?: string | null,
   rootId?: string | null,
+  trashId?: string | null,
 ): DriveFileOut {
   const raw = file.properties?.["syncStatus"];
   const syncStatus: DriveFileOut["syncStatus"] =
-    raw === "not-sync"
-      ? "not-sync"
-      : raw === "synced"
-        ? "synced"
-        : (archiveId && file.parents?.includes(archiveId)) ||
-            (rootId && file.parents?.includes(rootId))
+    raw === "trash" || (trashId && file.parents?.includes(trashId))
+      ? "trash"
+      : raw === "not-sync"
+        ? "not-sync"
+        : raw === "synced"
           ? "synced"
-          : "unknown";
+          : (archiveId && file.parents?.includes(archiveId)) ||
+              (rootId && file.parents?.includes(rootId))
+            ? "synced"
+            : "unknown";
   const uploadedBy = file.properties?.["uploadedBy"] || undefined;
   return {
     id: file.id,
@@ -150,6 +158,8 @@ export function toDriveFile(
     uploadedBy,
     isVideo: file.mimeType.startsWith("video/"),
     isImage: file.mimeType.startsWith("image/"),
+    imageMediaMetadata: file.imageMediaMetadata,
+    videoMediaMetadata: file.videoMediaMetadata,
   };
 }
 
@@ -256,7 +266,7 @@ export async function listDriveFiles(
   const response = await driveFetch(
     env,
     `/drive/v3/files?q=${encodeURIComponent(query)}&fields=${encodeURIComponent(
-      "files(id,name,mimeType,size,createdTime,modifiedTime,parents,properties,thumbnailLink)",
+      "files(id,name,mimeType,size,createdTime,modifiedTime,parents,properties,thumbnailLink,imageMediaMetadata,videoMediaMetadata)",
     )}&orderBy=createdTime desc&pageSize=100`,
   );
   if (!response || !response.ok) return null;
@@ -352,6 +362,7 @@ export async function resolveNestedFolderPath(
 export async function listSubfolders(
   env: Env,
   parentId: string,
+  includeTrash = false,
 ): Promise<DriveFolderOut[] | null> {
   const query = `mimeType = 'application/vnd.google-apps.folder' and '${escapeDriveQuery(parentId)}' in parents and trashed = false`;
   const response = await driveFetch(
@@ -362,11 +373,11 @@ export async function listSubfolders(
   );
   if (!response || !response.ok) return null;
   const body = (await response.json()) as { files?: DriveFileRaw[] };
-  const folders = body.files ?? [];
+  const folders = (body.files ?? []).filter((f) => includeTrash || f.name !== TRASH_FOLDER);
   return folders.map((f) => {
     const raw = f.properties?.["syncStatus"];
     const syncStatus: DriveFolderOut["syncStatus"] =
-      raw === "not-sync" ? "not-sync" : raw === "synced" ? "synced" : "unknown";
+      raw === "trash" ? "trash" : raw === "not-sync" ? "not-sync" : raw === "synced" ? "synced" : "unknown";
     return {
       id: f.id,
       name: f.name,
@@ -681,3 +692,230 @@ export async function getNotSyncTree(env: Env): Promise<TreeFileItem[]> {
 
   return treeItems;
 }
+
+export async function createResumableUploadSession(
+  env: Env,
+  params: {
+    fileName: string;
+    mimeType: string;
+    size?: number;
+    parentFolderId: string;
+    uploadedBy: string;
+  },
+): Promise<{ uploadUrl: string } | null> {
+  const metadata = {
+    name: params.fileName,
+    parents: [params.parentFolderId],
+    properties: {
+      syncStatus: "not-sync",
+      uploadedBy: params.uploadedBy,
+    },
+  };
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json; charset=UTF-8",
+    "X-Upload-Content-Type": params.mimeType,
+  };
+  if (params.size && params.size > 0) {
+    headers["X-Upload-Content-Length"] = String(params.size);
+  }
+
+  const res = await driveFetch(
+    env,
+    "/upload/drive/v3/files?uploadType=resumable",
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify(metadata),
+    },
+  );
+
+  if (!res || !res.ok) return null;
+  const uploadUrl = res.headers.get("Location");
+  if (!uploadUrl) return null;
+
+  return { uploadUrl };
+}
+
+export async function moveItemToTrash(
+  env: Env,
+  itemId: string,
+): Promise<boolean> {
+  const rootId = await getRootFolderId(env);
+  const trashId = await findOrCreateFolder(env, TRASH_FOLDER, rootId, "trash");
+  if (!trashId) return false;
+
+  const meta = await driveFetch(
+    env,
+    `/drive/v3/files/${encodeURIComponent(itemId)}?fields=${encodeURIComponent("id,parents")}`,
+  );
+  if (!meta || !meta.ok) return false;
+  const metaBody = (await meta.json()) as { parents?: string[] };
+  const removeParents = (metaBody.parents ?? []).filter((p) => p !== trashId).join(",");
+
+  const query = new URLSearchParams({ addParents: trashId });
+  if (removeParents) query.set("removeParents", removeParents);
+
+  const res = await driveFetch(
+    env,
+    `/drive/v3/files/${encodeURIComponent(itemId)}?${query.toString()}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ properties: { syncStatus: "trash" } }),
+    },
+  );
+  return Boolean(res && res.ok);
+}
+
+export async function restoreItemFromTrash(
+  env: Env,
+  itemId: string,
+): Promise<boolean> {
+  const rootId = await getRootFolderId(env);
+  const inboxId = await findOrCreateFolder(env, INBOX_FOLDER, rootId, null);
+  const trash = await findFolder(env, TRASH_FOLDER, rootId);
+  if (!inboxId) return false;
+
+  const meta = await driveFetch(
+    env,
+    `/drive/v3/files/${encodeURIComponent(itemId)}?fields=${encodeURIComponent("id,parents")}`,
+  );
+  if (!meta || !meta.ok) return false;
+  const metaBody = (await meta.json()) as { parents?: string[] };
+  const removeParents = (metaBody.parents ?? []).filter((p) => p === trash?.id).join(",");
+
+  const query = new URLSearchParams({ addParents: inboxId });
+  if (removeParents) query.set("removeParents", removeParents);
+
+  const res = await driveFetch(
+    env,
+    `/drive/v3/files/${encodeURIComponent(itemId)}?${query.toString()}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ properties: { syncStatus: "not-sync" } }),
+    },
+  );
+  return Boolean(res && res.ok);
+}
+
+export async function emptyTrashFolder(
+  env: Env,
+  olderThanDays?: number,
+): Promise<{ deletedCount: number }> {
+  const rootId = await getRootFolderId(env);
+  const trash = await findFolder(env, TRASH_FOLDER, rootId);
+  if (!trash) return { deletedCount: 0 };
+
+  let query = `'${escapeDriveQuery(trash.id)}' in parents and trashed = false`;
+  if (olderThanDays && olderThanDays > 0) {
+    const cutoff = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000).toISOString();
+    query += ` and modifiedTime < '${cutoff}'`;
+  }
+
+  const res = await driveFetch(
+    env,
+    `/drive/v3/files?q=${encodeURIComponent(query)}&fields=${encodeURIComponent("files(id,mimeType)")}&pageSize=100`,
+  );
+  if (!res || !res.ok) return { deletedCount: 0 };
+  const body = (await res.json()) as { files?: { id: string; mimeType: string }[] };
+  const items = body.files ?? [];
+  let deletedCount = 0;
+
+  for (const item of items) {
+    const delRes = await driveFetch(env, `/drive/v3/files/${encodeURIComponent(item.id)}`, {
+      method: "DELETE",
+    });
+    if (delRes && delRes.ok) {
+      deletedCount++;
+    }
+  }
+
+  return { deletedCount };
+}
+
+export async function getStorageQuotaAndBreakdown(env: Env): Promise<{
+  limit?: string;
+  usage?: string;
+  usageInDrive?: string;
+  usageInDriveTrash?: string;
+  usagePercent?: number;
+  stagingSize: number;
+  stagingCount: number;
+  archiveSize: number;
+  archiveCount: number;
+  trashSize: number;
+  trashCount: number;
+}> {
+  const aboutRes = await driveFetch(env, "/drive/v3/about?fields=storageQuota");
+  let limit: string | undefined;
+  let usage: string | undefined;
+  let usageInDrive: string | undefined;
+  let usageInDriveTrash: string | undefined;
+  let usagePercent: number | undefined;
+
+  if (aboutRes && aboutRes.ok) {
+    const aboutBody = (await aboutRes.json()) as {
+      storageQuota?: {
+        limit?: string;
+        usage?: string;
+        usageInDrive?: string;
+        usageInDriveTrash?: string;
+      };
+    };
+    if (aboutBody.storageQuota) {
+      limit = aboutBody.storageQuota.limit;
+      usage = aboutBody.storageQuota.usage;
+      usageInDrive = aboutBody.storageQuota.usageInDrive;
+      usageInDriveTrash = aboutBody.storageQuota.usageInDriveTrash;
+      const numLimit = limit ? parseFloat(limit) : 0;
+      const numUsage = usage ? parseFloat(usage) : 0;
+      if (numLimit > 0) {
+        usagePercent = Math.round((numUsage / numLimit) * 1000) / 10;
+      }
+    }
+  }
+
+  const rootId = await getRootFolderId(env);
+  const inbox = await findFolder(env, INBOX_FOLDER, rootId);
+  const archive = await findFolder(env, ARCHIVE_FOLDER, rootId);
+  const trash = await findFolder(env, TRASH_FOLDER, rootId);
+
+  async function getFolderStats(folderId?: string): Promise<{ size: number; count: number }> {
+    if (!folderId) return { size: 0, count: 0 };
+    const res = await driveFetch(
+      env,
+      `/drive/v3/files?q=${encodeURIComponent(`'${escapeDriveQuery(folderId)}' in parents and trashed = false`)}&fields=${encodeURIComponent("files(size,mimeType)")}&pageSize=100`,
+    );
+    if (!res || !res.ok) return { size: 0, count: 0 };
+    const body = (await res.json()) as { files?: { size?: string; mimeType: string }[] };
+    const files = (body.files ?? []).filter((f) => f.mimeType !== "application/vnd.google-apps.folder");
+    let size = 0;
+    for (const f of files) {
+      if (f.size) size += parseInt(f.size, 10) || 0;
+    }
+    return { size, count: files.length };
+  }
+
+  const [stagingStats, archiveStats, trashStats] = await Promise.all([
+    getFolderStats(inbox?.id),
+    getFolderStats(archive?.id),
+    getFolderStats(trash?.id),
+  ]);
+
+  return {
+    limit,
+    usage,
+    usageInDrive,
+    usageInDriveTrash,
+    usagePercent,
+    stagingSize: stagingStats.size,
+    stagingCount: stagingStats.count,
+    archiveSize: archiveStats.size,
+    archiveCount: archiveStats.count,
+    trashSize: trashStats.size,
+    trashCount: trashStats.count,
+  };
+}
+

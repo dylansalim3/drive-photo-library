@@ -11,7 +11,7 @@ import type { DriveFolder } from "@/api";
 
 export interface FolderItemsProps {
   folders: DriveFolder[];
-  viewMode: "grid" | "list";
+  viewMode: "grid" | "list" | "map";
   onSelectFolder: (folderId: string) => void;
   onMarkFolderSynced: (folderId: string) => void;
   marking?: boolean;

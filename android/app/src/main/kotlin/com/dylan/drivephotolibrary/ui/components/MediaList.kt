@@ -3,6 +3,7 @@ package com.dylan.drivephotolibrary.ui.components
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -208,21 +209,33 @@ fun MediaListItem(
                 .weight(1f)
                 .padding(horizontal = 12.dp)
         ) {
-            Text(
-                text = file.name,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = file.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                if (!file.uploadedBy.isNullOrBlank()) {
+                    UploaderAvatarPill(
+                        username = file.uploadedBy,
+                        size = PillSize.XSMALL,
+                        isGlass = false
+                    )
+                }
+            }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(top = 2.dp)
             ) {
                 val meta = listOfNotNull(
                     Formatters.formatBytes(file.size).ifBlank { null },
-                    Formatters.formatDate(file.createdTime ?: file.modifiedTime).ifBlank { null },
-                    file.uploadedBy?.let { "by @$it" }
+                    Formatters.formatDate(file.createdTime ?: file.modifiedTime).ifBlank { null }
                 ).joinToString(" • ")
                 Text(
                     text = meta,

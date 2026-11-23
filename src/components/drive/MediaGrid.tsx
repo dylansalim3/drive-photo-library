@@ -7,6 +7,7 @@ import {
 import { formatBytes, formatDate, type DriveFile } from "@/api";
 import { cx } from "@/utils/cx";
 import { groupFilesByDate, type DateGroupingMode } from "@/utils/dateGrouping";
+import { UploaderAvatarPill } from "./UploaderAvatarPill";
 
 export interface MediaGridProps {
   files: DriveFile[];
@@ -201,11 +202,16 @@ function MediaCard({
 
         {/* Bottom Scrim / Gradient Overlay */}
         <div className="absolute inset-x-0 bottom-0 z-10 flex flex-col justify-end bg-gradient-to-t from-black/85 via-black/40 to-transparent p-2.5 pt-8 text-white">
-          <p className="truncate text-body-2-medium font-medium drop-shadow-xs leading-tight">
-            {file.name}
-          </p>
+          <div className="flex items-center justify-between gap-1.5 min-w-0">
+            <p className="truncate text-body-2-medium font-medium drop-shadow-xs leading-tight">
+              {file.name}
+            </p>
+            {file.uploadedBy && (
+              <UploaderAvatarPill username={file.uploadedBy} size="xs" />
+            )}
+          </div>
           <p className="mt-0.5 text-caption-2-regular text-white/75 truncate drop-shadow-xs">
-            {[formatBytes(file.size), formatDate(file.createdTime), file.uploadedBy ? `@${file.uploadedBy}` : null]
+            {[formatBytes(file.size), formatDate(file.createdTime)]
               .filter(Boolean)
               .join(" · ")}
           </p>

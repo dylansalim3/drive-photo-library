@@ -9,6 +9,7 @@ import { Chip } from "@/components/base/badges/chip";
 import { Button } from "@/components/base/buttons/button";
 import { formatBytes, formatDate, type DriveFile } from "@/api";
 import { groupFilesByDate, type DateGroupingMode } from "@/utils/dateGrouping";
+import { UploaderAvatarPill } from "./UploaderAvatarPill";
 
 export interface MediaListProps {
   files: DriveFile[];
@@ -182,11 +183,16 @@ function MediaRow({
 
         {/* Title & Metadata */}
         <div className="min-w-0">
-          <p className="truncate text-body-medium font-medium text-text-primary group-hover:text-accent-500 transition-colors">
-            {file.name}
-          </p>
+          <div className="flex items-center gap-2">
+            <p className="truncate text-body-medium font-medium text-text-primary group-hover:text-accent-500 transition-colors">
+              {file.name}
+            </p>
+            {file.uploadedBy && (
+              <UploaderAvatarPill username={file.uploadedBy} size="xs" variant="subtle" />
+            )}
+          </div>
           <p className="text-caption-1-regular text-text-secondary truncate">
-            {[formatBytes(file.size), formatDate(file.createdTime), file.uploadedBy ? `by @${file.uploadedBy}` : null]
+            {[formatBytes(file.size), formatDate(file.createdTime)]
               .filter(Boolean)
               .join(" · ")}
           </p>

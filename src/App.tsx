@@ -3,11 +3,14 @@ import {
   RiCheckLine,
   RiCloseLine,
   RiComputerLine,
+  RiDeleteBinLine,
   RiDownloadLine,
   RiFolderAddLine,
   RiFolderLine,
   RiLogoutBoxLine,
   RiMoonLine,
+  RiPauseLine,
+  RiPlayLine,
   RiRefreshLine,
   RiSettings3Line,
   RiSunLine,
@@ -27,10 +30,13 @@ import { MediaGrid } from "./components/drive/MediaGrid";
 import { MediaList } from "./components/drive/MediaList";
 import { MediaSortFilterBar } from "./components/drive/MediaSortFilterBar";
 import { MediaViewerModal } from "./components/drive/MediaViewerModal";
+import { TravelMap } from "./components/drive/TravelMap";
+import { StorageUsageMeter } from "./components/drive/StorageUsageMeter";
 import { MobileFabSheet } from "./components/drive/MobileFabSheet";
 import { SyncManagerModal } from "./components/drive/SyncManagerModal";
 import { UserManagerSection } from "./components/drive/UserManagerSection";
 import { SharedFolderConfigSection } from "./components/drive/SharedFolderConfigSection";
+import { ChunkedUploader } from "./utils/chunkedUploader";
 import {
   filterAndSortFiles,
   groupFilesByDate,
@@ -57,7 +63,8 @@ import {
   logout,
   markFolderSynced,
   markSynced,
-  uploadFile,
+  moveToTrash,
+  restoreFromTrash,
   type AuthStatus,
   type Breadcrumb,
   type DriveFile,
@@ -71,7 +78,7 @@ const VIDEO_EXTENSIONS = [
   "mp4", "mov", "m4v", "mkv", "avi", "webm", "3gp", "3g2", "m2ts", "mts", "wmv",
 ] as const;
 
-type QueueStatus = "queued" | "uploading" | "processing" | "confirmed" | "failed";
+type QueueStatus = "queued" | "uploading" | "processing" | "paused" | "confirmed" | "failed";
 
 interface QueueItem {
   key: string;
@@ -80,8 +87,10 @@ interface QueueItem {
   targetFolderId?: string;
   status: QueueStatus;
   progress: number;
+  speed?: string;
   error?: string;
   driveId?: string;
+  uploader?: ChunkedUploader;
 }
 
 function ErrorBanner({ message }: { message: string }) {
@@ -298,6 +307,7 @@ function QueueChip({ status }: { status: QueueStatus }) {
   if (status === "failed") return <Chip variant="caption" color="rose">Failed</Chip>;
   if (status === "processing") return <Chip variant="caption" color="yellow">Processing</Chip>;
   if (status === "uploading") return <Chip variant="caption" color="blue">Uploading</Chip>;
+  if (status === "paused") return <Chip variant="caption" color="yellow">Paused</Chip>;
   return <Chip variant="caption" color="soft">Queued</Chip>;
 }
 
@@ -315,9 +325,9 @@ export default function App() {
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [selected, setSelected] = useState<DriveFile | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-  const [viewMode, setViewMode] = useState<"grid" | "list">(() => {
+  const [viewMode, setViewMode] = useState<"grid" | "list" | "map">(() => {
     try {
-      return (localStorage.getItem("drive-view-mode") as "grid" | "list") || "grid";
+      return (localStorage.getItem("drive-view-mode") as "grid" | "list" | "map") || "grid";
     } catch {
       return "grid";
     }
@@ -369,7 +379,7 @@ export default function App() {
   const queueProcessing = useRef(false);
   const folderCache = useRef<Record<string, string>>({});
 
-  const handleViewModeChange = (mode: "grid" | "list") => {
+  const handleViewModeChange = (mode: "grid" | "list" | "map") => {
     setViewMode(mode);
     try {
       localStorage.setItem("drive-view-mode", mode);
@@ -502,7 +512,7 @@ export default function App() {
     void refreshFiles();
   }, [refreshFiles]);
 
-  // Sequential queue: resolves folder paths as needed, uploads one file at a time
+  // Sequential queue: resolves folder paths as needed, uploads one file at a time via ChunkedUploader
   useEffect(() => {
     if (queueProcessing.current) return;
     const next = queue.find((item) => item.status === "queued");
@@ -535,25 +545,51 @@ export default function App() {
         }
       }
 
-      return uploadFile(
-        next.file,
-        (percent, processing) => {
+      const uploader = new ChunkedUploader({
+        file: next.file,
+        folderId: targetId,
+        folderPath: next.folderPath,
+        onProgress: (p) => {
+          const speedStr = p.speedBytesPerSec > 0 ? `${formatBytes(String(Math.round(p.speedBytesPerSec)))}/s` : undefined;
           setQueue((current) =>
             current.map((item) =>
               item.key === next.key
-                ? { ...item, status: processing ? "processing" : "uploading", progress: percent }
+                ? { ...item, progress: p.percent, speed: speedStr, status: "uploading" }
                 : item,
             ),
           );
         },
-        targetId,
+        onStateChange: (state, err) => {
+          if (state === "paused") {
+            setQueue((current) =>
+              current.map((item) => (item.key === next.key ? { ...item, status: "paused" } : item)),
+            );
+          } else if (state === "failed") {
+            setQueue((current) =>
+              current.map((item) =>
+                item.key === next.key
+                  ? { ...item, status: "failed", error: err?.message || "Upload failed." }
+                  : item,
+              ),
+            );
+          }
+        },
+      });
+
+      setQueue((current) =>
+        current.map((item) =>
+          item.key === next.key ? { ...item, uploader, status: "uploading" } : item,
+        ),
       );
+
+      const result = await uploader.start();
+      return result as { id?: string } | undefined;
     })()
       .then((result) => {
         setQueue((current) =>
           current.map((item) =>
             item.key === next.key
-              ? { ...item, status: "confirmed", progress: 100, driveId: result.file.id }
+              ? { ...item, status: "confirmed", progress: 100, driveId: result?.id }
               : item,
           ),
         );
@@ -573,6 +609,38 @@ export default function App() {
         queueProcessing.current = false;
       });
   }, [queue, refreshFiles, currentFolderId]);
+
+  const handlePauseUpload = (item: QueueItem) => {
+    item.uploader?.pause();
+    setQueue((current) =>
+      current.map((i) => (i.key === item.key ? { ...i, status: "paused" } : i)),
+    );
+  };
+
+  const handleResumeUpload = (item: QueueItem) => {
+    setQueue((current) =>
+      current.map((i) => (i.key === item.key ? { ...i, status: "uploading" } : i)),
+    );
+    void item.uploader?.resume().then((res: any) => {
+      setQueue((current) =>
+        current.map((i) =>
+          i.key === item.key
+            ? { ...i, status: "confirmed", progress: 100, driveId: res?.id }
+            : i,
+        ),
+      );
+      setUploadNotice(`${item.file.name} is confirmed in Drive, tagged not-sync.`);
+      void refreshFiles();
+    }).catch((err: unknown) => {
+      setQueue((current) =>
+        current.map((i) =>
+          i.key === item.key
+            ? { ...i, status: "failed", error: err instanceof Error ? err.message : "Resume failed." }
+            : i,
+        ),
+      );
+    });
+  };
 
   // Prefetch neighbours of open file for instant next/prev browsing
   useEffect(() => {
@@ -887,6 +955,62 @@ export default function App() {
     }
   };
 
+  const [trashing, setTrashing] = useState(false);
+
+  const handleTrashSelected = async () => {
+    if (selectedFileIds.size === 0 && selectedFolderIds.size === 0) return;
+    setTrashing(true);
+    try {
+      await moveToTrash(Array.from(selectedFileIds), Array.from(selectedFolderIds));
+      handleClearSelection();
+      await refreshFiles();
+    } catch (err) {
+      setUploadNotice(err instanceof Error ? err.message : "Failed to move to trash.");
+    } finally {
+      setTrashing(false);
+    }
+  };
+
+  const handleRestoreSelected = async () => {
+    if (selectedFileIds.size === 0 && selectedFolderIds.size === 0) return;
+    setTrashing(true);
+    try {
+      await restoreFromTrash(Array.from(selectedFileIds), Array.from(selectedFolderIds));
+      handleClearSelection();
+      await refreshFiles();
+    } catch (err) {
+      setUploadNotice(err instanceof Error ? err.message : "Failed to restore items.");
+    } finally {
+      setTrashing(false);
+    }
+  };
+
+  const handleTrashFile = async (fileId: string) => {
+    setTrashing(true);
+    try {
+      await moveToTrash([fileId]);
+      setSelected(null);
+      await refreshFiles();
+    } catch (err) {
+      setUploadNotice(err instanceof Error ? err.message : "Failed to move to trash.");
+    } finally {
+      setTrashing(false);
+    }
+  };
+
+  const handleRestoreFile = async (fileId: string) => {
+    setTrashing(true);
+    try {
+      await restoreFromTrash([fileId]);
+      setSelected(null);
+      await refreshFiles();
+    } catch (err) {
+      setUploadNotice(err instanceof Error ? err.message : "Failed to restore file.");
+    } finally {
+      setTrashing(false);
+    }
+  };
+
   if (!status) {
     return (
       <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-4">
@@ -1030,21 +1154,60 @@ export default function App() {
             {queue.map((item) => (
               <div
                 key={item.key}
-                className="flex items-center justify-between gap-3 rounded-2xl border border-border-button-default bg-background-primary-default p-3"
+                className="flex flex-col gap-2 rounded-2xl border border-border-button-default bg-background-primary-default p-3 shadow-xs"
               >
-                <div className="min-w-0">
-                  <p className="truncate text-body-medium text-text-primary">
-                    {item.folderPath ? `${item.folderPath}/` : ""}
-                    {item.file.name}
-                  </p>
-                  <p className="text-body-2-regular text-text-secondary">
-                    {formatBytes(String(item.file.size))}
-                    {item.status === "uploading" ? ` · ${item.progress}%` : ""}
-                    {item.status === "processing" ? " · Processing folder in Drive…" : ""}
-                    {item.error ? ` · ${item.error}` : ""}
-                  </p>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-body-medium font-medium text-text-primary">
+                      {item.folderPath ? `${item.folderPath}/` : ""}
+                      {item.file.name}
+                    </p>
+                    <p className="text-body-2-regular text-text-secondary">
+                      {formatBytes(String(item.file.size))}
+                      {item.status === "uploading" ? ` · ${item.progress}%` : ""}
+                      {item.speed ? ` · ${item.speed}` : ""}
+                      {item.status === "paused" ? ` · Paused at ${item.progress}%` : ""}
+                      {item.status === "processing" ? " · Processing folder in Drive…" : ""}
+                      {item.error ? ` · ${item.error}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {item.status === "uploading" && item.uploader && (
+                      <Button
+                        variant="ghost"
+                        size="small"
+                        iconOnly
+                        leadingIcon={RiPauseLine}
+                        aria-label="Pause upload"
+                        onClick={() => handlePauseUpload(item)}
+                      />
+                    )}
+                    {item.status === "paused" && item.uploader && (
+                      <Button
+                        variant="ghost"
+                        size="small"
+                        iconOnly
+                        leadingIcon={RiPlayLine}
+                        aria-label="Resume upload"
+                        onClick={() => handleResumeUpload(item)}
+                      />
+                    )}
+                    <QueueChip status={item.status} />
+                  </div>
                 </div>
-                <QueueChip status={item.status} />
+
+                {/* Progress bar for active uploads */}
+                {(item.status === "uploading" || item.status === "paused") && (
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-background-secondary-default">
+                    <div
+                      className={cx(
+                        "h-full transition-all duration-300",
+                        item.status === "paused" ? "bg-amber-400" : "bg-accent-500",
+                      )}
+                      style={{ width: `${item.progress}%` }}
+                    />
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -1090,15 +1253,37 @@ export default function App() {
         ) : files.length === 0 && subfolders.length === 0 ? (
           <div className="rounded-3xl border border-dashed border-border-button-default p-8 text-center bg-background-primary-default/50">
             <RiFolderLine className="mx-auto size-10 text-text-tertiary" />
-            <p className="mt-2 text-body-medium font-medium text-text-primary">No files or folders found</p>
+            <p className="mt-2 text-body-medium font-medium text-text-primary">
+              {filter === "trash" ? "Travel Trash is empty" : "No files or folders found"}
+            </p>
             <p className="mt-1 text-body-2-regular text-text-secondary">
-              Upload photos, videos, or folders from your device.
+              {filter === "trash"
+                ? "Items moved to trash will appear here."
+                : "Upload photos, videos, or folders from your device."}
             </p>
           </div>
         ) : (
-          files.length > 0 && (
-            <div className="flex flex-col gap-3">
-              <MediaSortFilterBar
+          <div className="flex flex-col gap-3">
+            {filter === "trash" && (
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-text-primary">
+                <div className="flex items-center gap-2.5">
+                  <RiDeleteBinLine className="size-5 text-amber-500 shrink-0" />
+                  <p className="text-body-2-regular">
+                    Items in <strong>Travel Trash</strong> are kept until permanently emptied. Restoring moves them back to Travel Inbox.
+                  </p>
+                </div>
+                <Button
+                  variant="secondary"
+                  size="small"
+                  leadingIcon={RiDeleteBinLine}
+                  onClick={() => setShowSettings(true)}
+                >
+                  Storage & Empty Trash
+                </Button>
+              </div>
+            )}
+
+            <MediaSortFilterBar
                 mediaTypeFilter={mediaTypeFilter}
                 onMediaTypeFilterChange={setMediaTypeFilter}
                 sortOption={sortOption}
@@ -1130,6 +1315,11 @@ export default function App() {
                 <div className="rounded-2xl border border-dashed border-border-button-default p-6 text-center text-text-secondary">
                   <p className="text-body-medium">No matching files found for the selected filter.</p>
                 </div>
+              ) : viewMode === "map" ? (
+                <TravelMap
+                  files={processedFiles}
+                  onSelectFile={(file) => handleSelectFile(file, processedFiles.indexOf(file))}
+                />
               ) : viewMode === "grid" ? (
                 <MediaGrid
                   files={processedFiles}
@@ -1151,7 +1341,6 @@ export default function App() {
                 />
               )}
             </div>
-          )
         )}
       </section>
 
@@ -1165,26 +1354,49 @@ export default function App() {
             {selectedFileIds.size + selectedFolderIds.size} selected
           </span>
           <div className="h-4 w-px bg-border-secondary" />
-          <Button
-            variant="primary"
-            size="small"
-            leadingIcon={RiDownloadLine}
-            disabled={batchDownloading}
-            onClick={() => void handleDownloadSelectedAsZip()}
-          >
-            {batchDownloading
-              ? `Zipping (${batchDownloadProgress?.percent ?? 0}%)…`
-              : "Download as ZIP"}
-          </Button>
-          <Button
-            variant="secondary"
-            size="small"
-            leadingIcon={RiCheckLine}
-            disabled={marking}
-            onClick={() => void handleSyncSelected()}
-          >
-            Mark Synced
-          </Button>
+          {filter === "trash" ? (
+            <Button
+              variant="primary"
+              size="small"
+              leadingIcon={RiRefreshLine}
+              disabled={trashing}
+              onClick={() => void handleRestoreSelected()}
+            >
+              {trashing ? "Restoring…" : "Restore"}
+            </Button>
+          ) : (
+            <>
+              <Button
+                variant="primary"
+                size="small"
+                leadingIcon={RiDownloadLine}
+                disabled={batchDownloading}
+                onClick={() => void handleDownloadSelectedAsZip()}
+              >
+                {batchDownloading
+                  ? `Zipping (${batchDownloadProgress?.percent ?? 0}%)…`
+                  : "Download as ZIP"}
+              </Button>
+              <Button
+                variant="secondary"
+                size="small"
+                leadingIcon={RiCheckLine}
+                disabled={marking}
+                onClick={() => void handleSyncSelected()}
+              >
+                Mark Synced
+              </Button>
+              <Button
+                variant="secondary"
+                size="small"
+                leadingIcon={RiDeleteBinLine}
+                disabled={trashing}
+                onClick={() => void handleTrashSelected()}
+              >
+                {trashing ? "Moving…" : "Move to Trash"}
+              </Button>
+            </>
+          )}
           <Button
             variant="ghost"
             size="small"
@@ -1312,6 +1524,15 @@ export default function App() {
 
               <Divider />
 
+              {/* Storage Usage & Trash Quota Breakdown */}
+              <StorageUsageMeter
+                onTrashEmptied={() => {
+                  void refreshFiles();
+                }}
+              />
+
+              <Divider />
+
               {/* Google Drive & Shared Folders (Approach A) */}
               <SharedFolderConfigSection
                 status={status}
@@ -1336,6 +1557,8 @@ export default function App() {
           onDownload={handleSingleDownload}
           onMarkSynced={handleMarkSelectedSynced}
           marking={marking}
+          onTrash={handleTrashFile}
+          onRestore={handleRestoreFile}
         />
       )}
 

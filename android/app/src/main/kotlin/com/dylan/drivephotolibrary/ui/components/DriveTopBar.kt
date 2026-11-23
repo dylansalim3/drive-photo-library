@@ -3,6 +3,7 @@ package com.dylan.drivephotolibrary.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -14,8 +15,11 @@ import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.FolderShared
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -45,8 +49,11 @@ fun DriveTopBar(
     viewMode: ViewMode,
     onViewModeChange: (ViewMode) -> Unit,
     username: String?,
+    role: String? = null,
     onLogout: () -> Unit,
     onOpenVacationSync: () -> Unit,
+    onOpenUserManagement: () -> Unit = {},
+    onOpenSharedDriveConfig: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -102,13 +109,23 @@ fun DriveTopBar(
                 }
             }
 
-            // View Mode Toggle Button
+            // View Mode Toggle Button (Grid -> List -> Map -> Grid)
             IconButton(onClick = {
-                onViewModeChange(if (viewMode == ViewMode.GRID) ViewMode.LIST else ViewMode.GRID)
+                val nextMode = when (viewMode) {
+                    ViewMode.GRID -> ViewMode.LIST
+                    ViewMode.LIST -> ViewMode.MAP
+                    ViewMode.MAP -> ViewMode.GRID
+                }
+                onViewModeChange(nextMode)
             }) {
+                val (icon, desc) = when (viewMode) {
+                    ViewMode.GRID -> Pair(Icons.AutoMirrored.Filled.ViewList, "Switch to list view")
+                    ViewMode.LIST -> Pair(Icons.Default.Map, "Switch to travel map view")
+                    ViewMode.MAP -> Pair(Icons.Default.GridView, "Switch to grid view")
+                }
                 Icon(
-                    imageVector = if (viewMode == ViewMode.GRID) Icons.AutoMirrored.Filled.ViewList else Icons.Default.GridView,
-                    contentDescription = if (viewMode == ViewMode.GRID) "Switch to list view" else "Switch to grid view",
+                    imageVector = icon,
+                    contentDescription = desc,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -146,9 +163,52 @@ fun DriveTopBar(
                     onDismissRequest = { showMenu = false }
                 ) {
                     DropdownMenuItem(
-                        text = { Text("Signed in as ${username ?: "User"}") },
+                        text = {
+                            Column {
+                                Text(
+                                    text = "@${username ?: "user"}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = role?.replaceFirstChar { it.uppercase() } ?: "Editor",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.outline
+                                )
+                            }
+                        },
                         onClick = { },
                         enabled = false
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Users & Security") },
+                        leadingIcon = {
+                            Icon(Icons.Default.Security, contentDescription = null)
+                        },
+                        onClick = {
+                            showMenu = false
+                            onOpenUserManagement()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Shared Drive / Folder") },
+                        leadingIcon = {
+                            Icon(Icons.Default.FolderShared, contentDescription = null)
+                        },
+                        onClick = {
+                            showMenu = false
+                            onOpenSharedDriveConfig()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Vacation Sync Center") },
+                        leadingIcon = {
+                            Icon(Icons.Default.CloudDownload, contentDescription = null)
+                        },
+                        onClick = {
+                            showMenu = false
+                            onOpenVacationSync()
+                        }
                     )
                     DropdownMenuItem(
                         text = { Text("Sign out") },

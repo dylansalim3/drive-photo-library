@@ -26,12 +26,41 @@ export interface Breadcrumb {
   name: string;
 }
 
+export interface ImageMediaMetadata {
+  width?: number;
+  height?: number;
+  rotation?: number;
+  location?: {
+    latitude?: number;
+    longitude?: number;
+    altitude?: number;
+  };
+  time?: string;
+  cameraMake?: string;
+  cameraModel?: string;
+  exposureTime?: number;
+  aperture?: number;
+  focalLength?: number;
+  isoSpeed?: number;
+  lens?: string;
+  exposureBias?: number;
+  flashUsed?: boolean;
+}
+
+export interface VideoMediaMetadata {
+  width?: number;
+  height?: number;
+  durationMillis?: string;
+}
+
+export type SyncStatus = "not-sync" | "synced" | "trash" | "unknown";
+
 export interface DriveFolderOut {
   id: string;
   name: string;
   parentId?: string;
   itemCount?: number;
-  syncStatus: "not-sync" | "synced" | "unknown";
+  syncStatus: SyncStatus;
 }
 
 export interface PagesContext {
