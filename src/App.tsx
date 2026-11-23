@@ -315,6 +315,22 @@ export default function App() {
   const [status, setStatus] = useState<AuthStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("not-sync");
+  const [remoteUpdateTag, setRemoteUpdateTag] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("https://api.github.com/repos/dylansalim3/drive-photo-library/releases/latest")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.tag_name) {
+          const cleanTag = data.tag_name.replace(/^v/i, "");
+          const current = "1.1.0";
+          if (cleanTag !== current) {
+            setRemoteUpdateTag(data.tag_name);
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [currentFolderId, setCurrentFolderId] = useState<string | undefined>(undefined);
@@ -1047,6 +1063,23 @@ export default function App() {
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-4xl flex-col px-3 sm:px-6 pb-24 pt-3 sm:pt-6">
+      {/* Remote Web Update Notification Banner */}
+      {remoteUpdateTag && (
+        <div className="mb-3 flex items-center justify-between gap-3 px-4 py-2.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-caption-1-medium">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+            <span>New release <strong>{remoteUpdateTag}</strong> is live on GitHub.</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="px-2.5 py-1 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 font-semibold text-caption-1 transition-colors"
+          >
+            Reload to update
+          </button>
+        </div>
+      )}
+
       {/* Sticky Google Drive Header with Search and View Mode Switcher */}
       <DriveHeader
         username={status.username}

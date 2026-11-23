@@ -5,9 +5,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -20,6 +22,7 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -40,6 +43,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.dylan.drivephotolibrary.data.update.UpdateStatus
 import com.dylan.drivephotolibrary.ui.viewmodel.ViewMode
 
 @Composable
@@ -54,6 +58,8 @@ fun DriveTopBar(
     onOpenVacationSync: () -> Unit,
     onOpenUserManagement: () -> Unit = {},
     onOpenSharedDriveConfig: () -> Unit = {},
+    updateStatus: UpdateStatus = UpdateStatus.Idle,
+    onCheckForUpdates: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -208,6 +214,40 @@ fun DriveTopBar(
                         onClick = {
                             showMenu = false
                             onOpenVacationSync()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = when (updateStatus) {
+                                        is UpdateStatus.ReadyToInstall -> "Install Update (Ready)"
+                                        is UpdateStatus.Available -> "Update to v${updateStatus.info.latestVersion}"
+                                        is UpdateStatus.Downloading -> "Downloading update..."
+                                        else -> "Check for Updates"
+                                    }
+                                )
+                                if (updateStatus is UpdateStatus.ReadyToInstall || updateStatus is UpdateStatus.Available) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFF10B981))
+                                    )
+                                }
+                            }
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.SystemUpdate,
+                                contentDescription = null,
+                                tint = if (updateStatus is UpdateStatus.ReadyToInstall) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurface
+                            )
+                        },
+                        onClick = {
+                            showMenu = false
+                            onCheckForUpdates()
                         }
                     )
                     DropdownMenuItem(

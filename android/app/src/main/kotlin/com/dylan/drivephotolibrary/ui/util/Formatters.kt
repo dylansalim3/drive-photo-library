@@ -6,6 +6,10 @@ import java.util.Locale
 import java.util.TimeZone
 
 object Formatters {
+    fun formatBytes(bytes: Long): String {
+        return formatBytes(bytes.toString())
+    }
+
     fun formatBytes(bytesStr: String?): String {
         val bytes = bytesStr?.toLongOrNull() ?: return ""
         if (bytes < 1024) return "$bytes B"

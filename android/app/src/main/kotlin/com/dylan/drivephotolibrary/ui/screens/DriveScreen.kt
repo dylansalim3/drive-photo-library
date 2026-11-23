@@ -8,7 +8,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +20,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -27,6 +30,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Archive
@@ -58,14 +62,23 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.dylan.drivephotolibrary.data.model.DriveFile
 import com.dylan.drivephotolibrary.data.model.DriveFolder
+import com.dylan.drivephotolibrary.ui.components.AppUpdateBanner
+import com.dylan.drivephotolibrary.ui.components.AppUpdateDialog
 import com.dylan.drivephotolibrary.ui.components.BreadcrumbsBar
+import com.dylan.drivephotolibrary.ui.components.DriveDualPaneContent
 import com.dylan.drivephotolibrary.ui.components.DriveTopBar
 import com.dylan.drivephotolibrary.ui.components.FolderGridCard
 import com.dylan.drivephotolibrary.ui.components.FolderListItem
@@ -76,6 +89,8 @@ import com.dylan.drivephotolibrary.ui.components.SharedDriveConfigBottomSheet
 import com.dylan.drivephotolibrary.ui.components.UploadFabSheet
 import com.dylan.drivephotolibrary.ui.components.UserManagementBottomSheet
 import com.dylan.drivephotolibrary.ui.components.VacationSyncBottomSheet
+import com.dylan.drivephotolibrary.ui.util.DevicePosture
+import com.dylan.drivephotolibrary.ui.util.rememberDevicePosture
 import com.dylan.drivephotolibrary.ui.viewmodel.DriveViewModel
 import com.dylan.drivephotolibrary.ui.viewmodel.ViewMode
 
@@ -85,7 +100,10 @@ fun DriveScreen(
     viewModel: DriveViewModel,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
+    val devicePosture by rememberDevicePosture()
+    var focusedFile by remember { mutableStateOf<DriveFile?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val vacationSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -137,7 +155,16 @@ fun DriveScreen(
                         viewModel.loadStorageBreakdown()
                     },
                     onOpenUserManagement = { viewModel.openUserManagement() },
-                    onOpenSharedDriveConfig = { viewModel.openSharedDriveConfig() }
+                    onOpenSharedDriveConfig = { viewModel.openSharedDriveConfig() },
+                    updateStatus = uiState.updateStatus,
+                    onCheckForUpdates = { viewModel.checkForAppUpdates(silent = false) }
+                )
+
+                // Remote In-App OTA Update Progress & Fallback Banner
+                AppUpdateBanner(
+                    status = uiState.updateStatus,
+                    onOpenDialog = { viewModel.showAppUpdateDialog() },
+                    onInstallDirectly = { viewModel.installDownloadedApk(context) }
                 )
 
                 // Breadcrumbs Bar with Back Navigation & Refresh (Full gallery height maximized)
@@ -258,155 +285,176 @@ fun DriveScreen(
                     }
                 }
 
-                // Subfolders Section
-                if (uiState.subfolders.isNotEmpty()) {
-                    Text(
-                        text = "Folders (${uiState.subfolders.size})",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp)
-                    )
+                // Foldable Adaptive Dual-Pane or Standard Single-Pane Layout
+                val isDualPane = devicePosture is DevicePosture.DualPaneExpanded || devicePosture is DevicePosture.Book
 
-                    if (uiState.viewMode == ViewMode.GRID) {
-                        LazyVerticalGrid(
-                            columns = GridCells.Fixed(2),
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.fillMaxWidth()
+                if (isDualPane && uiState.viewMode != ViewMode.MAP) {
+                    DriveDualPaneContent(
+                        uiState = uiState,
+                        focusedFile = focusedFile,
+                        onFocusFile = { focusedFile = it },
+                        onOpenFileLightbox = { viewModel.selectFile(it) },
+                        onNavigateFolder = { viewModel.navigateToFolder(it) },
+                        onMarkSynced = { viewModel.markFileSynced(it) },
+                        onTrashFile = { viewModel.moveToTrash(listOf(it), emptyList()) },
+                        onDownloadFile = { viewModel.downloadFolderZip(DriveFolder(id = it.id, name = it.name)) },
+                        onToggleSelectFile = { viewModel.toggleFileSelection(it) },
+                        onToggleSelectFolder = { viewModel.toggleFolderSelection(it) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                    )
+                } else {
+                    // Subfolders Section
+                    if (uiState.subfolders.isNotEmpty()) {
+                        Text(
+                            text = "Folders (${uiState.subfolders.size})",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp)
+                        )
+
+                        if (uiState.viewMode == ViewMode.GRID) {
+                            LazyVerticalGrid(
+                                columns = GridCells.Fixed(2),
+                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                items(uiState.subfolders, key = { it.id }) { folder ->
+                                    FolderGridCard(
+                                        folder = folder,
+                                        onClick = { viewModel.navigateToFolder(folder.id) },
+                                        onMarkSynced = { viewModel.markFolderSynced(folder.id) },
+                                        onDownloadZip = { viewModel.downloadFolderZip(folder) },
+                                        isSelectMode = uiState.isSelectMode,
+                                        isSelected = uiState.selectedFolderIds.contains(folder.id),
+                                        onToggleSelect = { viewModel.toggleFolderSelection(folder.id) }
+                                    )
+                                }
+                            }
+                        } else {
+                            LazyColumn(
+                                contentPadding = PaddingValues(vertical = 4.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                items(uiState.subfolders, key = { it.id }) { folder ->
+                                    FolderListItem(
+                                        folder = folder,
+                                        onClick = { viewModel.navigateToFolder(folder.id) },
+                                        onMarkSynced = { viewModel.markFolderSynced(folder.id) },
+                                        onDownloadZip = { viewModel.downloadFolderZip(folder) },
+                                        isSelectMode = uiState.isSelectMode,
+                                        isSelected = uiState.selectedFolderIds.contains(folder.id),
+                                        onToggleSelect = { viewModel.toggleFolderSelection(folder.id) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Media Files Section
+                    if (uiState.isLoadingFiles && uiState.files.isEmpty() && uiState.subfolders.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .weight(1f),
+                            contentAlignment = Alignment.Center
                         ) {
-                            items(uiState.subfolders, key = { it.id }) { folder ->
-                                FolderGridCard(
-                                    folder = folder,
-                                    onClick = { viewModel.navigateToFolder(folder.id) },
-                                    onMarkSynced = { viewModel.markFolderSynced(folder.id) },
-                                    onDownloadZip = { viewModel.downloadFolderZip(folder) },
-                                    isSelectMode = uiState.isSelectMode,
-                                    isSelected = uiState.selectedFolderIds.contains(folder.id),
-                                    onToggleSelect = { viewModel.toggleFolderSelection(folder.id) }
+                            CircularProgressIndicator()
+                        }
+                    } else if (uiState.files.isEmpty() && uiState.subfolders.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .weight(1f),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(
+                                    imageVector = Icons.Default.FolderOpen,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(56.dp)
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "No items in this folder",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "Tap + to upload photos, videos, or create subfolders",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.outline
                                 )
                             }
                         }
                     } else {
-                        LazyColumn(
-                            contentPadding = PaddingValues(vertical = 4.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            items(uiState.subfolders, key = { it.id }) { folder ->
-                                FolderListItem(
-                                    folder = folder,
-                                    onClick = { viewModel.navigateToFolder(folder.id) },
-                                    onMarkSynced = { viewModel.markFolderSynced(folder.id) },
-                                    onDownloadZip = { viewModel.downloadFolderZip(folder) },
+                        if (uiState.files.isNotEmpty()) {
+                            MediaSortFilterBar(
+                                syncFilter = uiState.filter,
+                                onSyncFilterChange = { viewModel.setFilter(it) },
+                                mediaTypeFilter = uiState.mediaTypeFilter,
+                                onMediaTypeFilterChange = { viewModel.setMediaTypeFilter(it) },
+                                sortOption = uiState.sortOption,
+                                onSortOptionChange = { viewModel.setSortOption(it) },
+                                dateGrouping = uiState.dateGrouping,
+                                onDateGroupingChange = { viewModel.setDateGrouping(it) },
+                                isSelectMode = uiState.isSelectMode,
+                                onToggleSelectMode = { viewModel.toggleSelectMode() },
+                                totalCount = uiState.files.size,
+                                uploaderFilter = uiState.uploaderFilter,
+                                onUploaderFilterChange = { viewModel.setUploaderFilter(it) },
+                                uploaders = uiState.uploaders
+                            )
+
+                            if (uiState.processedFiles.isEmpty()) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(32.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "No matching files for selected filter",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            } else if (uiState.viewMode == ViewMode.MAP) {
+                                TravelMapScreen(
+                                    files = uiState.processedFiles,
+                                    onSelectFile = { file ->
+                                        val index = uiState.processedFiles.indexOf(file)
+                                        if (index >= 0) viewModel.selectFile(index)
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            } else if (uiState.viewMode == ViewMode.GRID) {
+                                MediaGrid(
+                                    files = uiState.processedFiles,
+                                    onSelectFile = { _, index -> viewModel.selectFile(index) },
+                                    dateGrouping = uiState.dateGrouping,
                                     isSelectMode = uiState.isSelectMode,
-                                    isSelected = uiState.selectedFolderIds.contains(folder.id),
-                                    onToggleSelect = { viewModel.toggleFolderSelection(folder.id) }
+                                    selectedFileIds = uiState.selectedFileIds,
+                                    onToggleSelectFile = { viewModel.toggleFileSelection(it.id) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            } else {
+                                MediaList(
+                                    files = uiState.processedFiles,
+                                    onSelectFile = { _, index -> viewModel.selectFile(index) },
+                                    onDownloadFile = { viewModel.downloadFolderZip(DriveFolder(id = it.id, name = it.name)) },
+                                    dateGrouping = uiState.dateGrouping,
+                                    isSelectMode = uiState.isSelectMode,
+                                    selectedFileIds = uiState.selectedFileIds,
+                                    onToggleSelectFile = { viewModel.toggleFileSelection(it.id) },
+                                    modifier = Modifier.weight(1f)
                                 )
                             }
-                        }
-                    }
-                }
-
-                // Media Files Section
-                if (uiState.isLoadingFiles && uiState.files.isEmpty() && uiState.subfolders.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .weight(1f),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator()
-                    }
-                } else if (uiState.files.isEmpty() && uiState.subfolders.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .weight(1f),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                imageVector = Icons.Default.FolderOpen,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(56.dp)
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "No items in this folder",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = "Tap + to upload photos, videos, or create subfolders",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.outline
-                            )
-                        }
-                    }
-                } else {
-                    if (uiState.files.isNotEmpty()) {
-                        MediaSortFilterBar(
-                            syncFilter = uiState.filter,
-                            onSyncFilterChange = { viewModel.setFilter(it) },
-                            mediaTypeFilter = uiState.mediaTypeFilter,
-                            onMediaTypeFilterChange = { viewModel.setMediaTypeFilter(it) },
-                            sortOption = uiState.sortOption,
-                            onSortOptionChange = { viewModel.setSortOption(it) },
-                            dateGrouping = uiState.dateGrouping,
-                            onDateGroupingChange = { viewModel.setDateGrouping(it) },
-                            isSelectMode = uiState.isSelectMode,
-                            onToggleSelectMode = { viewModel.toggleSelectMode() },
-                            totalCount = uiState.files.size,
-                            uploaderFilter = uiState.uploaderFilter,
-                            onUploaderFilterChange = { viewModel.setUploaderFilter(it) },
-                            uploaders = uiState.uploaders
-                        )
-
-                        if (uiState.processedFiles.isEmpty()) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(32.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "No matching files for selected filter",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        } else if (uiState.viewMode == ViewMode.MAP) {
-                            TravelMapScreen(
-                                files = uiState.processedFiles,
-                                onSelectFile = { file ->
-                                    val index = uiState.processedFiles.indexOf(file)
-                                    if (index >= 0) viewModel.selectFile(index)
-                                },
-                                modifier = Modifier.weight(1f)
-                            )
-                        } else if (uiState.viewMode == ViewMode.GRID) {
-                            MediaGrid(
-                                files = uiState.processedFiles,
-                                onSelectFile = { _, index -> viewModel.selectFile(index) },
-                                dateGrouping = uiState.dateGrouping,
-                                isSelectMode = uiState.isSelectMode,
-                                selectedFileIds = uiState.selectedFileIds,
-                                onToggleSelectFile = { viewModel.toggleFileSelection(it.id) },
-                                modifier = Modifier.weight(1f)
-                            )
-                        } else {
-                            MediaList(
-                                files = uiState.processedFiles,
-                                onSelectFile = { _, index -> viewModel.selectFile(index) },
-                                onDownloadFile = { viewModel.downloadFolderZip(DriveFolder(id = it.id, name = it.name)) },
-                                dateGrouping = uiState.dateGrouping,
-                                isSelectMode = uiState.isSelectMode,
-                                selectedFileIds = uiState.selectedFileIds,
-                                onToggleSelectFile = { viewModel.toggleFileSelection(it.id) },
-                                modifier = Modifier.weight(1f)
-                            )
                         }
                     }
                 }
@@ -420,117 +468,174 @@ fun DriveScreen(
                 exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(horizontal = 16.dp, vertical = 16.dp)
+                    .navigationBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
                 Surface(
-                    shape = RoundedCornerShape(24.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    shadowElevation = 10.dp,
+                    shape = RoundedCornerShape(28.dp),
+                    color = Color(0xF20F172A),
+                    border = BorderStroke(1.dp, Color(0x33FFFFFF)),
+                    shadowElevation = 12.dp,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text(
-                            text = "$selectedCount selected",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
+                        // Prominent High-Contrast Selection Count Pill
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = Color(0x2238BDF8),
+                            border = BorderStroke(1.dp, Color(0x4438BDF8)),
+                            modifier = Modifier.weight(1f, fill = false)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF38BDF8))
+                                )
+                                Text(
+                                    text = "$selectedCount selected",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    maxLines = 1
+                                )
+                            }
+                        }
 
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        // Styled Action Icon-Pills with generous 38dp touch targets
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             if (uiState.filter == "trash") {
-                                Button(
-                                    onClick = {
-                                        viewModel.restoreFromTrash(
-                                            uiState.selectedFileIds.toList(),
-                                            uiState.selectedFolderIds.toList()
-                                        )
-                                    },
-                                    shape = RoundedCornerShape(12.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                                // Restore Button
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color(0x3310B981),
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clickable {
+                                            viewModel.restoreFromTrash(
+                                                uiState.selectedFileIds.toList(),
+                                                uiState.selectedFolderIds.toList()
+                                            )
+                                        }
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Restore,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Restore", fontSize = 12.sp)
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.Restore,
+                                            contentDescription = "Restore",
+                                            tint = Color(0xFF34D399),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
                                 }
 
-                                OutlinedButton(
-                                    onClick = { viewModel.emptyTrash() },
-                                    shape = RoundedCornerShape(12.dp)
+                                // Delete Permanently Button
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color(0x33EF4444),
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clickable { viewModel.emptyTrash() }
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.DeleteForever,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.error,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Delete", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.DeleteForever,
+                                            contentDescription = "Delete",
+                                            tint = Color(0xFFF87171),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
                                 }
                             } else {
-                                Button(
-                                    onClick = { viewModel.downloadSelectedZip() },
-                                    shape = RoundedCornerShape(12.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                                // Download ZIP Button
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color(0x330284C7),
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clickable { viewModel.downloadSelectedZip() }
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Archive,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("ZIP", fontSize = 12.sp)
-                                }
-
-                                FilledTonalButton(
-                                    onClick = { viewModel.syncSelected() },
-                                    shape = RoundedCornerShape(12.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Check,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Sync", fontSize = 12.sp)
-                                }
-
-                                IconButton(
-                                    onClick = {
-                                        viewModel.moveToTrash(
-                                            uiState.selectedFileIds.toList(),
-                                            uiState.selectedFolderIds.toList()
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.Archive,
+                                            contentDescription = "Download ZIP",
+                                            tint = Color(0xFF38BDF8),
+                                            modifier = Modifier.size(20.dp)
                                         )
-                                    },
-                                    modifier = Modifier.size(36.dp)
+                                    }
+                                }
+
+                                // Mark Synced Button
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color(0x3310B981),
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clickable { viewModel.syncSelected() }
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Delete,
-                                        contentDescription = "Move to Trash",
-                                        tint = MaterialTheme.colorScheme.error
-                                    )
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = "Mark as Synced",
+                                            tint = Color(0xFF34D399),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+
+                                // Move to Trash Button
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color(0x33EF4444),
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clickable {
+                                            viewModel.moveToTrash(
+                                                uiState.selectedFileIds.toList(),
+                                                uiState.selectedFolderIds.toList()
+                                            )
+                                        }
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.Delete,
+                                            contentDescription = "Move to Trash",
+                                            tint = Color(0xFFF87171),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
                                 }
                             }
 
-                            IconButton(
-                                onClick = { viewModel.clearSelection() },
-                                modifier = Modifier.size(36.dp)
+                            // Clear Selection (Close) Button
+                            Surface(
+                                shape = CircleShape,
+                                color = Color(0x22FFFFFF),
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clickable { viewModel.clearSelection() }
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Clear Selection",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Clear Selection",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -652,6 +757,17 @@ fun DriveScreen(
             onRefresh = {
                 viewModel.loadDriveConfig()
             }
+        )
+    }
+
+    // Remote In-App OTA Update Modal Dialog (with progress bar, changelog & install action)
+    if (uiState.showUpdateDialog) {
+        AppUpdateDialog(
+            status = uiState.updateStatus,
+            onStartDownload = { viewModel.startAppUpdateDownload(it) },
+            onInstall = { viewModel.installDownloadedApk(context) },
+            onCancelDownload = { viewModel.cancelAppUpdate() },
+            onDismiss = { viewModel.dismissAppUpdateDialog() }
         )
     }
 }

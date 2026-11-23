@@ -16,6 +16,9 @@ import com.dylan.drivephotolibrary.data.model.SessionItem
 import com.dylan.drivephotolibrary.data.model.StorageBreakdown
 import com.dylan.drivephotolibrary.data.model.TreeItem
 import com.dylan.drivephotolibrary.data.repository.DriveRepository
+import com.dylan.drivephotolibrary.data.update.AppUpdateManager
+import com.dylan.drivephotolibrary.data.update.UpdateInfo
+import com.dylan.drivephotolibrary.data.update.UpdateStatus
 import com.dylan.drivephotolibrary.data.upload.ResumableUploader
 import com.dylan.drivephotolibrary.data.upload.UploadWorker
 import com.dylan.drivephotolibrary.data.util.ZipDownloader
@@ -129,7 +132,10 @@ data class DriveUiState(
     // Phase 5: Soft Delete, Trash & Storage Breakdown
     val storageBreakdown: StorageBreakdown? = null,
     val isLoadingStorage: Boolean = false,
-    val isTrashing: Boolean = false
+    val isTrashing: Boolean = false,
+    // Remote OTA Updates
+    val updateStatus: UpdateStatus = UpdateStatus.Idle,
+    val showUpdateDialog: Boolean = false
 ) {
     val uploaders: List<String>
         get() = files.mapNotNull { it.uploadedBy }.distinct()
@@ -187,9 +193,12 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
     val uiState: StateFlow<DriveUiState> = _uiState.asStateFlow()
 
     private var searchDebounceJob: Job? = null
+    private val updateManager = AppUpdateManager(application)
+    private var updateDownloadJob: Job? = null
 
     init {
         checkAuth()
+        checkForAppUpdates(silent = true)
     }
 
     fun checkAuth() {
@@ -1004,5 +1013,107 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
                 }
             )
         }
+    }
+
+    // --- Remote OTA App Updates ---
+
+    fun checkForAppUpdates(silent: Boolean = false) {
+        viewModelScope.launch {
+            if (!silent) {
+                _uiState.update { it.copy(updateStatus = UpdateStatus.Checking, showUpdateDialog = true) }
+            }
+            updateManager.checkForUpdate().fold(
+                onSuccess = { info ->
+                    if (info != null && info.isUpdateAvailable) {
+                        _uiState.update {
+                            it.copy(
+                                updateStatus = UpdateStatus.Available(info),
+                                showUpdateDialog = !silent
+                            )
+                        }
+                    } else {
+                        if (!silent) {
+                            _uiState.update {
+                                it.copy(
+                                    updateStatus = UpdateStatus.Idle,
+                                    showUpdateDialog = false,
+                                    actionNotice = "You are already on the latest version (${info?.currentVersion ?: "up to date"})"
+                                )
+                            }
+                        }
+                    }
+                },
+                onFailure = { err ->
+                    if (!silent) {
+                        _uiState.update {
+                            it.copy(
+                                updateStatus = UpdateStatus.Error(err.message ?: "Failed to check for updates"),
+                                showUpdateDialog = true
+                            )
+                        }
+                    }
+                }
+            )
+        }
+    }
+
+    fun startAppUpdateDownload(info: UpdateInfo) {
+        updateDownloadJob?.cancel()
+        updateDownloadJob = viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    updateStatus = UpdateStatus.Downloading(info, 0f, 0L, info.apkSize),
+                    showUpdateDialog = true
+                )
+            }
+            updateManager.downloadUpdate(info) { progress, downloaded, total ->
+                _uiState.update { current ->
+                    if (current.updateStatus is UpdateStatus.Downloading) {
+                        current.copy(
+                            updateStatus = UpdateStatus.Downloading(info, progress, downloaded, total)
+                        )
+                    } else current
+                }
+            }.fold(
+                onSuccess = { apkFile ->
+                    _uiState.update {
+                        it.copy(
+                            updateStatus = UpdateStatus.ReadyToInstall(info, apkFile),
+                            showUpdateDialog = true
+                        )
+                    }
+                    // Auto popup to install
+                    updateManager.installApk(getApplication(), apkFile)
+                },
+                onFailure = { err ->
+                    _uiState.update {
+                        it.copy(
+                            updateStatus = UpdateStatus.Error(err.message ?: "Download failed"),
+                            showUpdateDialog = true
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    fun installDownloadedApk(context: Context) {
+        val currentStatus = _uiState.value.updateStatus
+        if (currentStatus is UpdateStatus.ReadyToInstall) {
+            updateManager.installApk(context, currentStatus.apkFile)
+        }
+    }
+
+    fun cancelAppUpdate() {
+        updateDownloadJob?.cancel()
+        _uiState.update { it.copy(updateStatus = UpdateStatus.Idle, showUpdateDialog = false) }
+    }
+
+    fun showAppUpdateDialog() {
+        _uiState.update { it.copy(showUpdateDialog = true) }
+    }
+
+    fun dismissAppUpdateDialog() {
+        _uiState.update { it.copy(showUpdateDialog = false) }
     }
 }

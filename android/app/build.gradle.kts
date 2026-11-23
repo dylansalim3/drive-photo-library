@@ -76,6 +76,9 @@ dependencies {
   implementation(libs.coil.network.okhttp)
   implementation(libs.media3.exoplayer)
   implementation(libs.media3.ui)
+
+  // Foldables & Window Manager
+  implementation(libs.androidx.window)
   // Tooling
   debugImplementation(libs.androidx.compose.ui.tooling)
   // Instrumented tests

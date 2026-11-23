@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="0.175"
+        android:scaleY="0.175"
+        android:translateX="9.2"
+        android:translateY="7.45">
+
+        <!-- 3-Blade Aperture Silhouettes -->
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M 196,104 L 268,64 C 278,58 290,62 296,72 L 324,122 L 232,280 L 152,280 L 108,358 C 100,370 84,374 72,366 C 62,358 58,344 64,332 L 176,138 C 182,126 190,114 196,104 Z" />
+
+        <path
+            android:fillColor="#E6FFFFFF"
+            android:pathData="M 324,122 L 396,246 C 404,258 404,272 398,284 L 338,388 C 330,400 316,406 302,402 L 206,402 L 246,332 L 292,254 L 232,150 L 268,64 C 274,74 316,108 324,122 Z" />
+
+        <path
+            android:fillColor="#CCFFFFFF"
+            android:pathData="M 338,388 L 174,388 C 160,388 148,380 142,368 L 108,310 L 200,150 L 254,150 L 208,228 L 248,298 L 368,298 C 382,298 394,308 398,322 C 402,336 394,350 384,360 L 338,388 Z" />
+
+        <!-- Center Lens Rim & Pupil -->
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="6"
+            android:pathData="M 256,196 A 66,66 0 1,1 255.9,196 Z" />
+
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M 256,222 A 40,40 0 1,1 255.9,222 Z" />
+    </group>
+</vector>
