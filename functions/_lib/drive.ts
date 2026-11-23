@@ -140,7 +140,20 @@ export async function driveFetch(
 ): Promise<Response | null> {
   const token = await getAccessToken(env);
   if (!token) return null;
-  const response = await fetch(`https://www.googleapis.com${path}`, {
+
+  // Seamlessly support Shared Drives and shared external folders
+  let targetPath = path;
+  if (targetPath.includes("/drive/v3/files") || targetPath.includes("/upload/drive/v3/files")) {
+    const separator = targetPath.includes("?") ? "&" : "?";
+    if (!targetPath.includes("supportsAllDrives=")) {
+      targetPath += `${separator}supportsAllDrives=true`;
+    }
+    if (targetPath.includes("/drive/v3/files?") && !targetPath.includes("includeItemsFromAllDrives=")) {
+      targetPath += `&includeItemsFromAllDrives=true`;
+    }
+  }
+
+  const response = await fetch(`https://www.googleapis.com${targetPath}`, {
     ...init,
     headers: { Authorization: `Bearer ${token}`, ...(init.headers ?? {}) },
   });
