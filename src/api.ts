@@ -17,6 +17,8 @@ export interface AuthStatus {
   authenticated: boolean;
   driveConnected: boolean;
   driveError?: string;
+  username?: string;
+  rootFolderId?: string;
 }
 
 export interface Breadcrumb {

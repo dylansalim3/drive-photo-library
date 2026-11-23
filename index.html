@@ -8,6 +8,19 @@
       name="description"
       content="Stream-only phone viewer for Google Drive photos and videos. Travel uploads are tagged not-sync; bulk download happens from a computer at home, not the phone."
     />
+    <script>
+      (function() {
+        try {
+          var stored = localStorage.getItem("dpl_theme");
+          var isDark = stored === "dark" || (stored !== "light" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+          if (isDark) {
+            document.documentElement.classList.add("dark");
+          } else {
+            document.documentElement.classList.remove("dark");
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
