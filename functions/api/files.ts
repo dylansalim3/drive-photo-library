@@ -26,7 +26,7 @@ export async function onRequestGet(context: PagesContext): Promise<Response> {
   const search = url.searchParams.get("search") ?? "";
   const requestedFolderId = url.searchParams.get("folderId")?.trim();
 
-  const rootParentId = getRootFolderId(context.env);
+  const rootParentId = await getRootFolderId(context.env);
   const inbox = await findOrCreateFolder(context.env, INBOX_FOLDER, rootParentId, null);
   const archive = await findOrCreateFolder(context.env, ARCHIVE_FOLDER, rootParentId, null);
 

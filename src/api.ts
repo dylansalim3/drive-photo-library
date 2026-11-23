@@ -21,6 +21,16 @@ export interface AuthStatus {
   username?: string;
   role?: string;
   rootFolderId?: string;
+  rootFolderName?: string;
+  googleEmail?: string;
+  googleDisplayName?: string;
+}
+
+export interface DriveConfigResponse {
+  rootFolderId: string;
+  rootFolderName?: string;
+  googleEmail?: string;
+  googleDisplayName?: string;
 }
 
 export interface AppUser {
@@ -240,5 +250,45 @@ export async function changePassword(currentPassword: string, newPassword: strin
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ currentPassword, newPassword }),
+  });
+}
+
+export async function getDriveConfig(): Promise<DriveConfigResponse> {
+  return request<DriveConfigResponse>("/api/drive/config");
+}
+
+export async function setSharedRootFolder(folderInput: string): Promise<{
+  ok: boolean;
+  rootFolderId: string;
+  rootFolderName: string;
+  message: string;
+}> {
+  return request<{
+    ok: boolean;
+    rootFolderId: string;
+    rootFolderName: string;
+    message: string;
+  }>("/api/drive/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ folderInput }),
+  });
+}
+
+export async function resetRootFolder(): Promise<{
+  ok: boolean;
+  rootFolderId: string;
+  rootFolderName: string;
+  message: string;
+}> {
+  return request<{
+    ok: boolean;
+    rootFolderId: string;
+    rootFolderName: string;
+    message: string;
+  }>("/api/drive/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ resetDefault: true }),
   });
 }

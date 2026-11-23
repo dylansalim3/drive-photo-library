@@ -5,8 +5,91 @@ export const INBOX_FOLDER = "Travel Inbox";
 export const ARCHIVE_FOLDER = "Travel Archive";
 export const DEFAULT_ROOT_FOLDER_ID = "1XaVTeYnE79682ZTJzi7FYOH3D5siPZTb";
 
-export function getRootFolderId(env: Env): string | undefined {
+export async function getRootFolderId(env: Env): Promise<string | undefined> {
+  try {
+    const row = await env.DB.prepare(
+      "SELECT value FROM app_settings WHERE key = 'root_folder_id'",
+    ).first<{ value: string }>();
+    if (row?.value?.trim()) return row.value.trim();
+  } catch {}
   return env.DRIVE_ROOT_FOLDER_ID?.trim() || DEFAULT_ROOT_FOLDER_ID;
+}
+
+export async function getRootFolderName(env: Env): Promise<string | undefined> {
+  try {
+    const row = await env.DB.prepare(
+      "SELECT value FROM app_settings WHERE key = 'root_folder_name'",
+    ).first<{ value: string }>();
+    if (row?.value?.trim()) return row.value.trim();
+  } catch {}
+  return undefined;
+}
+
+export async function setRootFolderConfig(
+  env: Env,
+  folderId: string,
+  folderName?: string,
+): Promise<void> {
+  const now = Math.floor(Date.now() / 1000);
+  await env.DB.prepare(
+    "INSERT INTO app_settings (key, value, updated_at) VALUES ('root_folder_id', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+  )
+    .bind(folderId.trim(), now)
+    .run();
+
+  if (folderName) {
+    await env.DB.prepare(
+      "INSERT INTO app_settings (key, value, updated_at) VALUES ('root_folder_name', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+    )
+      .bind(folderName.trim(), now)
+      .run();
+  }
+}
+
+export function extractFolderId(input: string): string {
+  const trimmed = input.trim();
+  const folderMatch = trimmed.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if (folderMatch) return folderMatch[1];
+  const idParamMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (idParamMatch) return idParamMatch[1];
+  return trimmed;
+}
+
+export async function verifyFolderAccess(
+  env: Env,
+  folderIdOrUrl: string,
+): Promise<{ id: string; name: string } | null> {
+  const folderId = extractFolderId(folderIdOrUrl);
+  const res = await driveFetch(
+    env,
+    `/drive/v3/files/${encodeURIComponent(folderId)}?fields=id,name,mimeType`,
+  );
+  if (!res || !res.ok) {
+    // Check if it's a Shared Drive (driveId)
+    const driveRes = await driveFetch(
+      env,
+      `/drive/v3/drives/${encodeURIComponent(folderId)}?fields=id,name`,
+    );
+    if (driveRes && driveRes.ok) {
+      const driveBody = (await driveRes.json()) as { id: string; name: string };
+      return { id: driveBody.id, name: driveBody.name };
+    }
+    return null;
+  }
+  const body = (await res.json()) as { id: string; name: string; mimeType: string };
+  if (body.mimeType !== "application/vnd.google-apps.folder") {
+    throw new Error("The specified link/ID is a file, not a folder.");
+  }
+  return { id: body.id, name: body.name };
+}
+
+export async function getConnectedGoogleUser(
+  env: Env,
+): Promise<{ emailAddress?: string; displayName?: string } | null> {
+  const res = await driveFetch(env, "/drive/v3/about?fields=user(displayName,emailAddress)");
+  if (!res || !res.ok) return null;
+  const body = (await res.json()) as { user?: { displayName?: string; emailAddress?: string } };
+  return body.user ?? null;
 }
 
 export interface DriveTokenRow {
@@ -143,12 +226,14 @@ export async function driveFetch(
 
   // Seamlessly support Shared Drives and shared external folders
   let targetPath = path;
-  if (targetPath.includes("/drive/v3/files") || targetPath.includes("/upload/drive/v3/files")) {
+  if (targetPath.includes("/drive/v3/files") || targetPath.includes("/upload/drive/v3/files") || targetPath.includes("/drive/v3/drives")) {
     const separator = targetPath.includes("?") ? "&" : "?";
     if (!targetPath.includes("supportsAllDrives=")) {
       targetPath += `${separator}supportsAllDrives=true`;
     }
-    if (targetPath.includes("/drive/v3/files?") && !targetPath.includes("includeItemsFromAllDrives=")) {
+    const isList = (!init.method || init.method.toUpperCase() === "GET") &&
+      (targetPath.startsWith("/drive/v3/files?") || targetPath === "/drive/v3/files");
+    if (isList && !targetPath.includes("includeItemsFromAllDrives=")) {
       targetPath += `&includeItemsFromAllDrives=true`;
     }
   }
@@ -186,7 +271,7 @@ export async function findFolder(
   name: string,
   parentId?: string | null,
 ): Promise<DriveFileRaw | null> {
-  const parentIdTarget = parentId !== undefined ? parentId : getRootFolderId(env);
+  const parentIdTarget = parentId !== undefined ? parentId : await getRootFolderId(env);
   const parentClause = parentIdTarget ? ` and '${escapeDriveQuery(parentIdTarget)}' in parents` : "";
   const response = await driveFetch(
     env,
@@ -205,7 +290,7 @@ export async function findOrCreateFolder(
   parentId?: string | null,
   syncStatus: string | null = "not-sync",
 ): Promise<string | null> {
-  const parentIdTarget = parentId !== undefined ? parentId : getRootFolderId(env);
+  const parentIdTarget = parentId !== undefined ? parentId : await getRootFolderId(env);
   const existing = await findFolder(env, name, parentIdTarget);
   if (existing) return existing.id;
   const payload: { name: string; mimeType: string; parents?: string[]; properties?: Record<string, string> } = {
@@ -407,7 +492,7 @@ export async function listLibrary(
   filter: "all" | "not-sync" | "synced",
   search: string,
 ): Promise<{ files: DriveFileOut[]; inboxId: string | null; archiveId: string | null } | null> {
-  const rootId = getRootFolderId(env);
+  const rootId = await getRootFolderId(env);
   const inbox = await findFolder(env, INBOX_FOLDER, rootId);
   const archive = await findFolder(env, ARCHIVE_FOLDER, rootId);
   const searchClause = search ? ` and name contains '${escapeDriveQuery(search)}'` : "";

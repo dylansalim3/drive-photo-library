@@ -28,6 +28,7 @@ import { MediaViewerModal } from "./components/drive/MediaViewerModal";
 import { MobileFabSheet } from "./components/drive/MobileFabSheet";
 import { SyncManagerModal } from "./components/drive/SyncManagerModal";
 import { UserManagerSection } from "./components/drive/UserManagerSection";
+import { SharedFolderConfigSection } from "./components/drive/SharedFolderConfigSection";
 import {
   filterAndSortFiles,
   type DateGroupingMode,
@@ -1051,34 +1052,15 @@ export default function App() {
 
               <Divider />
 
-              {/* Google Drive Status */}
-              <div>
-                <p className="text-body-medium font-semibold text-text-primary">Google Drive Connection</p>
-                <div className="mt-2 flex items-center justify-between p-3 rounded-2xl border border-border-button-default bg-background-secondary-default">
-                  <div className="min-w-0">
-                    <p className="text-body-medium text-text-primary">Drive API</p>
-                    <p className="text-caption-1-regular text-text-secondary truncate">
-                      Root: {status.rootFolderId ?? "1XaVTeYnE79682ZTJzi7FYOH3D5siPZTb"}
-                    </p>
-                  </div>
-                  <Chip variant="caption" color={status.driveConnected ? "lime" : "rose"}>
-                    {status.driveConnected ? "Connected" : "Disconnected"}
-                  </Chip>
-                </div>
-                {!status.driveConnected && (
-                  <div className="mt-3">
-                    <Button
-                      variant="primary"
-                      size="small"
-                      onClick={() => {
-                        window.location.href = "/api/auth/drive/connect";
-                      }}
-                    >
-                      Connect Drive
-                    </Button>
-                  </div>
-                )}
-              </div>
+              {/* Google Drive & Shared Folders (Approach A) */}
+              <SharedFolderConfigSection
+                status={status}
+                onFolderChanged={() => {
+                  void refreshStatus();
+                  setCurrentFolderId(undefined);
+                  void refreshFiles();
+                }}
+              />
             </div>
           </div>
         </div>
