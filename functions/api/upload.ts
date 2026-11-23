@@ -1,4 +1,4 @@
-import { driveFetch, findOrCreateFolder, INBOX_FOLDER, toDriveFile } from "../_lib/drive";
+import { driveFetch, findOrCreateFolder, INBOX_FOLDER, resolveNestedFolderPath, toDriveFile } from "../_lib/drive";
 import { errorResponse, jsonResponse, requireSession } from "../_lib/http";
 import type { PagesContext } from "../_lib/types";
 
@@ -37,15 +37,31 @@ export async function onRequestPost(context: PagesContext): Promise<Response> {
     return errorResponse("BAD_REQUEST", "Only images and videos can be uploaded.", 400);
   }
 
-  const inboxId = await findOrCreateFolder(context.env, INBOX_FOLDER);
-  if (!inboxId) {
-    return errorResponse("DRIVE_ERROR", "Could not find or create the Travel Inbox folder.", 502);
+  const rawFolderId = form.get("folderId");
+  const folderId = typeof rawFolderId === "string" && rawFolderId.trim() ? rawFolderId.trim() : null;
+
+  const rawFolderPath = form.get("folderPath");
+  const folderPath = typeof rawFolderPath === "string" && rawFolderPath.trim() ? rawFolderPath.trim() : null;
+
+  let targetFolderId: string | null = folderId;
+
+  if (!targetFolderId && folderPath) {
+    const resolved = await resolveNestedFolderPath(context.env, folderPath);
+    targetFolderId = resolved?.id ?? null;
+  }
+
+  if (!targetFolderId) {
+    targetFolderId = await findOrCreateFolder(context.env, INBOX_FOLDER, undefined, null);
+  }
+
+  if (!targetFolderId) {
+    return errorResponse("DRIVE_ERROR", "Could not find or create the target upload folder.", 502);
   }
 
   const boundary = `dpl-${crypto.randomUUID()}`;
   const metadata = JSON.stringify({
     name: file.name,
-    parents: [inboxId],
+    parents: [targetFolderId],
     properties: { syncStatus: "not-sync" },
   });
   const header = new TextEncoder().encode(
