@@ -15,10 +15,16 @@ import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 
 class AppUpdateManager(
     private val context: Context,
-    private val okHttpClient: OkHttpClient = OkHttpClient()
+    private val okHttpClient: OkHttpClient = OkHttpClient.Builder()
+        .followRedirects(true)
+        .followSslRedirects(true)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .build()
 ) {
     private val json = Json { ignoreUnknownKeys = true }
 
