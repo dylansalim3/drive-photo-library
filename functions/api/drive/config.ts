@@ -4,31 +4,50 @@ import {
   getConnectedGoogleUser,
   getRootFolderId,
   getRootFolderName,
+  listSelfFolders,
+  listSharedDrives,
+  listSharedWithMeFolders,
+  searchAccessibleFolders,
   setRootFolderConfig,
   verifyFolderAccess,
 } from "../../_lib/drive";
-import { errorResponse, jsonResponse, requireAdmin, requireSessionUser } from "../../_lib/http";
+import { errorResponse, jsonResponse, requireSessionUser } from "../../_lib/http";
 import type { PagesContext } from "../../_lib/types";
 
 export async function onRequestGet(context: PagesContext): Promise<Response> {
   const user = await requireSessionUser(context);
   if ("status" in user) return user;
 
-  const rootFolderId = await getRootFolderId(context.env);
-  const rootFolderName = await getRootFolderName(context.env);
-  const googleUser = await getConnectedGoogleUser(context.env);
+  const url = new URL(context.request.url);
+  const search = url.searchParams.get("search")?.trim() || "";
+
+  const [rootFolderId, rootFolderName, googleUser, selfFolders, sharedFolders, sharedDrives, searchResults] =
+    await Promise.all([
+      getRootFolderId(context.env),
+      getRootFolderName(context.env),
+      getConnectedGoogleUser(context.env),
+      listSelfFolders(context.env),
+      listSharedWithMeFolders(context.env),
+      listSharedDrives(context.env),
+      search ? searchAccessibleFolders(context.env, search) : Promise.resolve([]),
+    ]);
 
   return jsonResponse({
+    ok: true,
     rootFolderId,
     rootFolderName,
     googleEmail: googleUser?.emailAddress,
     googleDisplayName: googleUser?.displayName,
+    selfFolders,
+    sharedFolders,
+    sharedDrives,
+    searchResults,
   });
 }
 
 export async function onRequestPost(context: PagesContext): Promise<Response> {
-  const admin = await requireAdmin(context);
-  if ("status" in admin) return admin;
+  const user = await requireSessionUser(context);
+  if ("status" in user) return user;
 
   let body: { folderInput?: unknown; resetDefault?: boolean };
   try {

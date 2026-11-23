@@ -143,7 +143,9 @@ data class SharedDriveItem(
 data class SharedFolderItem(
     val id: String,
     val name: String,
-    val owners: List<String> = emptyList()
+    val owners: List<String> = emptyList(),
+    val sharedBy: String? = null,
+    val canEdit: Boolean = true
 )
 
 @Serializable
@@ -153,8 +155,10 @@ data class DriveConfigResponse(
     val rootFolderName: String? = null,
     val googleEmail: String? = null,
     val googleDisplayName: String? = null,
+    val selfFolders: List<SharedFolderItem> = emptyList(),
     val sharedDrives: List<SharedDriveItem> = emptyList(),
-    val sharedFolders: List<SharedFolderItem> = emptyList()
+    val sharedFolders: List<SharedFolderItem> = emptyList(),
+    val searchResults: List<SharedFolderItem> = emptyList()
 )
 
 @Serializable

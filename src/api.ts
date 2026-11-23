@@ -55,11 +55,28 @@ export interface AuthStatus {
   googleDisplayName?: string;
 }
 
+export interface SharedFolderItem {
+  id: string;
+  name: string;
+  sharedBy?: string;
+  canEdit?: boolean;
+}
+
+export interface SharedDriveItem {
+  id: string;
+  name: string;
+}
+
 export interface DriveConfigResponse {
+  ok?: boolean;
   rootFolderId: string;
   rootFolderName?: string;
   googleEmail?: string;
   googleDisplayName?: string;
+  selfFolders?: SharedFolderItem[];
+  sharedFolders?: SharedFolderItem[];
+  sharedDrives?: SharedDriveItem[];
+  searchResults?: SharedFolderItem[];
 }
 
 export interface AppUser {
@@ -282,8 +299,9 @@ export async function changePassword(currentPassword: string, newPassword: strin
   });
 }
 
-export async function getDriveConfig(): Promise<DriveConfigResponse> {
-  return request<DriveConfigResponse>("/api/drive/config");
+export async function getDriveConfig(search?: string): Promise<DriveConfigResponse> {
+  const query = search ? `?search=${encodeURIComponent(search)}` : "";
+  return request<DriveConfigResponse>(`/api/drive/config${query}`);
 }
 
 export async function setSharedRootFolder(folderInput: string): Promise<{

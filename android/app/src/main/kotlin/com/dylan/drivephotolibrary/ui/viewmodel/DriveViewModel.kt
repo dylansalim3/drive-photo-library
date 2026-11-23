@@ -867,10 +867,10 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(showSharedDriveConfigSheet = false) }
     }
 
-    fun loadDriveConfig() {
+    fun loadDriveConfig(search: String? = null) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingDriveConfig = true) }
-            repository.getDriveConfig().fold(
+            repository.getDriveConfig(search).fold(
                 onSuccess = { cfg ->
                     _uiState.update { it.copy(isLoadingDriveConfig = false, driveConfig = cfg) }
                 },

@@ -89,7 +89,7 @@ interface DriveApiService {
 
     // Approach A: Shared Drive & Folder Routing
     @GET("drive/config")
-    suspend fun getDriveConfig(): DriveConfigResponse
+    suspend fun getDriveConfig(@Query("search") search: String? = null): DriveConfigResponse
 
     @POST("drive/config")
     suspend fun updateDriveConfig(@Body request: SetRootFolderRequest): DriveConfigResponse

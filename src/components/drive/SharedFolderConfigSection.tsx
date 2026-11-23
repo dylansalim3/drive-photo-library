@@ -1,13 +1,16 @@
 import { useState, useEffect, type FormEvent } from "react";
+import { cx } from "@/utils/cx";
 import {
   RiCheckLine,
   RiDriveLine,
   RiExternalLinkLine,
   RiFileCopyLine,
+  RiFolderLine,
   RiFolderSharedLine,
   RiInformationLine,
   RiRefreshLine,
   RiRestartLine,
+  RiSearchLine,
 } from "@remixicon/react";
 import { Button } from "@/components/base/buttons/button";
 import { Input } from "@/components/base/input/input";
@@ -38,11 +41,13 @@ export function SharedFolderConfigSection({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [showHowTo, setShowHowTo] = useState(false);
+  const [folderTab, setFolderTab] = useState<"self" | "shared" | "drives">("self");
+  const [searchQuery, setSearchQuery] = useState("");
 
-  const fetchConfig = async () => {
+  const fetchConfig = async (search?: string) => {
     setLoading(true);
     try {
-      const data = await getDriveConfig();
+      const data = await getDriveConfig(search);
       setConfig(data);
     } catch {
       // Use fallback from status
@@ -54,6 +59,18 @@ export function SharedFolderConfigSection({
   useEffect(() => {
     void fetchConfig();
   }, []);
+
+  useEffect(() => {
+    const trimmed = searchQuery.trim();
+    if (!trimmed) {
+      void fetchConfig();
+      return;
+    }
+    const timer = setTimeout(() => {
+      void fetchConfig(trimmed);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   const activeEmail = config?.googleEmail || status.googleEmail;
   const activeRootId = config?.rootFolderId || status.rootFolderId || "1XaVTeYnE79682ZTJzi7FYOH3D5siPZTb";
@@ -97,6 +114,22 @@ export function SharedFolderConfigSection({
       onFolderChanged?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to reset root folder.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSelectDiscoveredFolder = async (folderId: string) => {
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const res = await setSharedRootFolder(folderId);
+      setSuccess(`Active library switched to '${res.rootFolderName}'!`);
+      await fetchConfig();
+      onFolderChanged?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to switch library folder.");
     } finally {
       setSaving(false);
     }
@@ -279,6 +312,319 @@ export function SharedFolderConfigSection({
           Only administrators can change the active Google Drive library folder.
         </p>
       )}
+
+      {/* Folders Explorer: Self Drive & Shared Folders */}
+      <div className="flex flex-col gap-3 pt-3 border-t border-border-button-default">
+        <div className="flex items-center justify-between">
+          <p className="text-body-2-medium font-semibold text-text-primary">
+            Select Drive or Folder
+          </p>
+          <Button
+            variant="ghost"
+            size="small"
+            leadingIcon={RiRefreshLine}
+            disabled={loading}
+            onClick={() => void fetchConfig(searchQuery.trim() || undefined)}
+          >
+            {loading ? "Refreshing..." : "Refresh"}
+          </Button>
+        </div>
+
+        {/* Search input */}
+        <div className="relative">
+          <Input
+            type="text"
+            placeholder="Search all folders across Google Drive..."
+            value={searchQuery}
+            onChange={setSearchQuery}
+            className="w-full text-caption-1-regular pl-8"
+          />
+          <RiSearchLine className="size-4 text-text-secondary absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+        </div>
+
+        {/* Tab switcher (when not searching) */}
+        {!searchQuery.trim() && (
+          <div className="flex items-center gap-1.5 p-1 rounded-xl bg-background-secondary-default border border-border-button-default">
+            <button
+              type="button"
+              onClick={() => setFolderTab("self")}
+              className={cx(
+                "flex-1 py-1 px-2.5 rounded-lg text-caption-1-medium transition-colors text-center",
+                folderTab === "self"
+                  ? "bg-accent-500 text-white font-medium"
+                  : "text-text-secondary hover:text-text-primary"
+              )}
+            >
+              My Drive ({config?.selfFolders?.length ?? 0})
+            </button>
+            <button
+              type="button"
+              onClick={() => setFolderTab("shared")}
+              className={cx(
+                "flex-1 py-1 px-2.5 rounded-lg text-caption-1-medium transition-colors text-center",
+                folderTab === "shared"
+                  ? "bg-accent-500 text-white font-medium"
+                  : "text-text-secondary hover:text-text-primary"
+              )}
+            >
+              Shared with Me ({config?.sharedFolders?.length ?? 0})
+            </button>
+            <button
+              type="button"
+              onClick={() => setFolderTab("drives")}
+              className={cx(
+                "flex-1 py-1 px-2.5 rounded-lg text-caption-1-medium transition-colors text-center",
+                folderTab === "drives"
+                  ? "bg-accent-500 text-white font-medium"
+                  : "text-text-secondary hover:text-text-primary"
+              )}
+            >
+              Shared Drives ({config?.sharedDrives?.length ?? 0})
+            </button>
+          </div>
+        )}
+
+        {/* Folder items */}
+        {searchQuery.trim() ? (
+          /* Search Results */
+          <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
+            <p className="text-caption-1-medium text-text-secondary">
+              Search results for "{searchQuery.trim()}":
+            </p>
+            {config?.searchResults && config.searchResults.length > 0 ? (
+              config.searchResults.map((folder) => {
+                const isCurrent = folder.id === activeRootId;
+                return (
+                  <div
+                    key={folder.id}
+                    className={cx(
+                      "flex items-center justify-between gap-3 p-3 rounded-2xl border transition-colors",
+                      isCurrent
+                        ? "border-accent-500 bg-accent-500/10"
+                        : "border-border-button-default bg-background-secondary-default hover:border-border-button-hover"
+                    )}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <RiFolderLine className="size-4 text-accent-500 shrink-0" />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="truncate text-body-2-medium font-medium text-text-primary">
+                            {folder.name}
+                          </p>
+                          <Chip
+                            variant="caption"
+                            color={folder.canEdit ? "lime" : "yellow"}
+                          >
+                            {folder.canEdit ? "Editor" : "View Only"}
+                          </Chip>
+                        </div>
+                        <p className="truncate text-caption-1-regular text-text-secondary">
+                          {folder.sharedBy ? `Owner: ${folder.sharedBy}` : folder.id}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="shrink-0">
+                      {isCurrent ? (
+                        <Chip variant="caption" color="lime">Active</Chip>
+                      ) : (
+                        <Button
+                          variant="secondary"
+                          size="small"
+                          disabled={saving}
+                          onClick={() => void handleSelectDiscoveredFolder(folder.id)}
+                        >
+                          Select
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="p-4 rounded-2xl border border-dashed border-border-button-default bg-background-secondary-default/50 text-center">
+                <p className="text-caption-1-regular text-text-secondary">
+                  No folders found matching "{searchQuery.trim()}".
+                </p>
+              </div>
+            )}
+          </div>
+        ) : folderTab === "self" ? (
+          /* My Drive Folders */
+          <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
+            {config?.selfFolders && config.selfFolders.length > 0 ? (
+              config.selfFolders.map((folder) => {
+                const isCurrent = folder.id === activeRootId;
+                return (
+                  <div
+                    key={folder.id}
+                    className={cx(
+                      "flex items-center justify-between gap-3 p-3 rounded-2xl border transition-colors",
+                      isCurrent
+                        ? "border-accent-500 bg-accent-500/10"
+                        : "border-border-button-default bg-background-secondary-default hover:border-border-button-hover"
+                    )}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <RiFolderLine className="size-4 text-accent-500 shrink-0" />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="truncate text-body-2-medium font-medium text-text-primary">
+                            {folder.name}
+                          </p>
+                          <Chip variant="caption" color="lime">
+                            Personal
+                          </Chip>
+                        </div>
+                        <p className="truncate text-caption-1-regular text-text-secondary">
+                          {folder.sharedBy || folder.id}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="shrink-0">
+                      {isCurrent ? (
+                        <Chip variant="caption" color="lime">Active</Chip>
+                      ) : (
+                        <Button
+                          variant="secondary"
+                          size="small"
+                          disabled={saving}
+                          onClick={() => void handleSelectDiscoveredFolder(folder.id)}
+                        >
+                          Select
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="p-3 rounded-2xl border border-dashed border-border-button-default bg-background-secondary-default/50 text-center">
+                <p className="text-caption-1-regular text-text-secondary">
+                  No personal folders found in your Google Drive.
+                </p>
+              </div>
+            )}
+          </div>
+        ) : folderTab === "shared" ? (
+          /* Shared with Me Folders */
+          <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
+            {config?.sharedFolders && config.sharedFolders.length > 0 ? (
+              config.sharedFolders.map((folder) => {
+                const isCurrent = folder.id === activeRootId;
+                return (
+                  <div
+                    key={folder.id}
+                    className={cx(
+                      "flex items-center justify-between gap-3 p-3 rounded-2xl border transition-colors",
+                      isCurrent
+                        ? "border-accent-500 bg-accent-500/10"
+                        : "border-border-button-default bg-background-secondary-default hover:border-border-button-hover"
+                    )}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <RiFolderSharedLine className="size-4 text-accent-500 shrink-0" />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="truncate text-body-2-medium font-medium text-text-primary">
+                            {folder.name}
+                          </p>
+                          <Chip
+                            variant="caption"
+                            color={folder.canEdit ? "lime" : "yellow"}
+                          >
+                            {folder.canEdit ? "Editor" : "View Only"}
+                          </Chip>
+                        </div>
+                        <p className="truncate text-caption-1-regular text-text-secondary">
+                          {folder.sharedBy ? `Shared by ${folder.sharedBy}` : folder.id}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="shrink-0">
+                      {isCurrent ? (
+                        <Chip variant="caption" color="lime">Active</Chip>
+                      ) : (
+                        <Button
+                          variant="secondary"
+                          size="small"
+                          disabled={saving}
+                          onClick={() => void handleSelectDiscoveredFolder(folder.id)}
+                        >
+                          Select
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="p-3 rounded-2xl border border-dashed border-border-button-default bg-background-secondary-default/50 text-center">
+                <p className="text-caption-1-regular text-text-secondary">
+                  No external folders shared with you yet. Ask friends or family to share a Google Drive folder with{" "}
+                  <span className="font-mono text-text-primary">{activeEmail}</span> as Editor.
+                </p>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* Shared Drives */
+          <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
+            {config?.sharedDrives && config.sharedDrives.length > 0 ? (
+              config.sharedDrives.map((drive) => {
+                const isCurrent = drive.id === activeRootId;
+                return (
+                  <div
+                    key={drive.id}
+                    className={cx(
+                      "flex items-center justify-between gap-3 p-3 rounded-2xl border transition-colors",
+                      isCurrent
+                        ? "border-accent-500 bg-accent-500/10"
+                        : "border-border-button-default bg-background-secondary-default hover:border-border-button-hover"
+                    )}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <RiDriveLine className="size-4 text-accent-500 shrink-0" />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="truncate text-body-2-medium font-medium text-text-primary">
+                            {drive.name}
+                          </p>
+                          <Chip variant="caption" color="blue">
+                            Shared Drive
+                          </Chip>
+                        </div>
+                        <p className="truncate text-caption-1-regular text-text-secondary">
+                          {drive.id}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="shrink-0">
+                      {isCurrent ? (
+                        <Chip variant="caption" color="lime">Active</Chip>
+                      ) : (
+                        <Button
+                          variant="secondary"
+                          size="small"
+                          disabled={saving}
+                          onClick={() => void handleSelectDiscoveredFolder(drive.id)}
+                        >
+                          Select
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="p-3 rounded-2xl border border-dashed border-border-button-default bg-background-secondary-default/50 text-center">
+                <p className="text-caption-1-regular text-text-secondary">
+                  No Google Workspace Shared Drives discovered.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

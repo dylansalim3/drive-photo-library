@@ -161,9 +161,9 @@ class DriveRepository(private val context: Context) {
         }
 
     // Phase 2: Drive Configuration (Approach A)
-    suspend fun getDriveConfig(): Result<DriveConfigResponse> = withContext(Dispatchers.IO) {
+    suspend fun getDriveConfig(search: String? = null): Result<DriveConfigResponse> = withContext(Dispatchers.IO) {
         try {
-            Result.success(api.getDriveConfig())
+            Result.success(api.getDriveConfig(search))
         } catch (e: Exception) {
             Result.failure(e)
         }

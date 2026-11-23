@@ -20,17 +20,22 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderShared
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -43,7 +48,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -58,6 +65,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dylan.drivephotolibrary.data.model.AuthStatus
 import com.dylan.drivephotolibrary.data.model.DriveConfigResponse
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -68,7 +76,8 @@ fun SharedDriveConfigBottomSheet(
     onDismiss: () -> Unit,
     onSwitchFolder: (folderId: String) -> Unit,
     onResetDefault: () -> Unit,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    onSearch: (query: String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -80,6 +89,18 @@ fun SharedDriveConfigBottomSheet(
     var manualFolderId by remember { mutableStateOf("") }
     var copied by remember { mutableStateOf(false) }
     var showHowTo by remember { mutableStateOf(false) }
+    var selectedTab by remember { mutableIntStateOf(0) }
+    var searchFolderQuery by remember { mutableStateOf("") }
+
+    LaunchedEffect(searchFolderQuery) {
+        val trimmed = searchFolderQuery.trim()
+        if (trimmed.isEmpty()) {
+            onRefresh()
+        } else {
+            delay(400)
+            onSearch(trimmed)
+        }
+    }
 
     fun copyEmail() {
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -265,70 +286,387 @@ fun SharedDriveConfigBottomSheet(
                 }
             }
 
-            val sharedItems = remember(driveConfig) {
-                val list = mutableListOf<Pair<String, String>>()
-                driveConfig?.sharedDrives?.forEach { list.add(Pair(it.id, "${it.name} (Shared Drive)")) }
-                driveConfig?.sharedFolders?.forEach { list.add(Pair(it.id, it.name)) }
-                list
-            }
+            // Search Bar across Google Drive
+            OutlinedTextField(
+                value = searchFolderQuery,
+                onValueChange = { searchFolderQuery = it },
+                placeholder = { Text("Search folders in Google Drive...", fontSize = 13.sp) },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                trailingIcon = {
+                    if (searchFolderQuery.isNotEmpty()) {
+                        IconButton(onClick = { searchFolderQuery = "" }) {
+                            Icon(Icons.Default.Clear, contentDescription = "Clear search", modifier = Modifier.size(18.dp))
+                        }
+                    }
+                },
+                singleLine = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+            )
 
-            if (sharedItems.isEmpty()) {
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainer,
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            val selfFolders = driveConfig?.selfFolders.orEmpty()
+            val sharedFolders = driveConfig?.sharedFolders.orEmpty()
+            val sharedDrives = driveConfig?.sharedDrives.orEmpty()
+            val searchResults = driveConfig?.searchResults.orEmpty()
+
+            // Tab Filter Chips (shown when not actively searching)
+            if (searchFolderQuery.isBlank()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        text = "No shared drives or external folders discovered yet. Share a folder with $activeEmail to see it here.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.outline,
-                        modifier = Modifier.padding(12.dp)
+                    FilterChip(
+                        selected = selectedTab == 0,
+                        onClick = { selectedTab = 0 },
+                        label = { Text("My Drive (${selfFolders.size})", fontSize = 12.sp) }
+                    )
+                    FilterChip(
+                        selected = selectedTab == 1,
+                        onClick = { selectedTab = 1 },
+                        label = { Text("Shared with Me (${sharedFolders.size})", fontSize = 12.sp) }
+                    )
+                    FilterChip(
+                        selected = selectedTab == 2,
+                        onClick = { selectedTab = 2 },
+                        label = { Text("Shared Drives (${sharedDrives.size})", fontSize = 12.sp) }
                     )
                 }
             } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(if (sharedItems.size > 3) 160.dp else (sharedItems.size * 54).dp)
-                ) {
-                    items(sharedItems, key = { it.first }) { item ->
-                        val isCurrent = item.first == activeRootId
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (isCurrent) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                Text(
+                    text = "Search results for \"${searchFolderQuery.trim()}\":",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.padding(vertical = 2.dp)
+                )
+            }
+
+            if (searchFolderQuery.isNotBlank()) {
+                // Search Results
+                if (searchResults.isEmpty()) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = if (isLoading) "Searching Google Drive..." else "No folders found matching \"${searchFolderQuery.trim()}\".",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.outline,
+                            modifier = Modifier.padding(14.dp)
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(if (searchResults.size > 3) 240.dp else (searchResults.size * 68).dp)
+                    ) {
+                        items(searchResults, key = { it.id }) { folder ->
+                            val isCurrent = folder.id == activeRootId
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = if (isCurrent) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = item.second,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                    Text(
-                                        text = item.first,
-                                        fontFamily = FontFamily.Monospace,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.outline
-                                    )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = folder.name,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Surface(
+                                                shape = RoundedCornerShape(6.dp),
+                                                color = if (folder.canEdit) Color(0x3310B981) else Color(0x33F59E0B)
+                                            ) {
+                                                Text(
+                                                    text = if (folder.canEdit) "Editor" else "View Only",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (folder.canEdit) Color(0xFF10B981) else Color(0xFFF59E0B),
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            text = folder.sharedBy?.let { "Owner: $it" } ?: folder.id,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.outline
+                                        )
+                                    }
+                                    if (isCurrent) {
+                                        Text(
+                                            text = "Active",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                    } else {
+                                        Button(
+                                            onClick = { onSwitchFolder(folder.id) },
+                                            modifier = Modifier.height(34.dp)
+                                        ) {
+                                            Text("Select", fontSize = 12.sp)
+                                        }
+                                    }
                                 }
-                                if (isCurrent) {
-                                    Text(
-                                        text = "Active",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                                    )
-                                } else {
-                                    Button(
-                                        onClick = { onSwitchFolder(item.first) },
-                                        modifier = Modifier.height(34.dp)
-                                    ) {
-                                        Text("Select", fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            } else if (selectedTab == 0) {
+                // Tab 0: My Drive Folders
+                if (selfFolders.isEmpty()) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "No personal folders found in your Google Drive.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.outline,
+                            modifier = Modifier.padding(14.dp)
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(if (selfFolders.size > 3) 240.dp else (selfFolders.size * 68).dp)
+                    ) {
+                        items(selfFolders, key = { it.id }) { folder ->
+                            val isCurrent = folder.id == activeRootId
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = if (isCurrent) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = folder.name,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Surface(
+                                                shape = RoundedCornerShape(6.dp),
+                                                color = Color(0x3310B981)
+                                            ) {
+                                                Text(
+                                                    text = "Personal",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color(0xFF10B981),
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            text = folder.sharedBy ?: folder.id,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.outline
+                                        )
+                                    }
+                                    if (isCurrent) {
+                                        Text(
+                                            text = "Active",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                    } else {
+                                        Button(
+                                            onClick = { onSwitchFolder(folder.id) },
+                                            modifier = Modifier.height(34.dp)
+                                        ) {
+                                            Text("Select", fontSize = 12.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if (selectedTab == 1) {
+                // Tab 1: Shared with Me Folders
+                if (sharedFolders.isEmpty()) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "No shared folders discovered yet. Ask friends or family to share a Google Drive folder with $activeEmail as Editor to see it appear here.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.outline,
+                            modifier = Modifier.padding(14.dp)
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(if (sharedFolders.size > 3) 240.dp else (sharedFolders.size * 68).dp)
+                    ) {
+                        items(sharedFolders, key = { it.id }) { folder ->
+                            val isCurrent = folder.id == activeRootId
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = if (isCurrent) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = folder.name,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Surface(
+                                                shape = RoundedCornerShape(6.dp),
+                                                color = if (folder.canEdit) Color(0x3310B981) else Color(0x33F59E0B)
+                                            ) {
+                                                Text(
+                                                    text = if (folder.canEdit) "Editor" else "View Only",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (folder.canEdit) Color(0xFF10B981) else Color(0xFFF59E0B),
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                        if (!folder.sharedBy.isNullOrBlank()) {
+                                            Text(
+                                                text = "Shared by ${folder.sharedBy}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.outline
+                                            )
+                                        } else {
+                                            Text(
+                                                text = folder.id,
+                                                fontFamily = FontFamily.Monospace,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.outline
+                                            )
+                                        }
+                                    }
+                                    if (isCurrent) {
+                                        Text(
+                                            text = "Active",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                    } else {
+                                        Button(
+                                            onClick = { onSwitchFolder(folder.id) },
+                                            modifier = Modifier.height(34.dp)
+                                        ) {
+                                            Text("Select", fontSize = 12.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Tab 2: Shared Drives
+                if (sharedDrives.isEmpty()) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "No Google Workspace Shared Drives discovered.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.outline,
+                            modifier = Modifier.padding(14.dp)
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(if (sharedDrives.size > 3) 240.dp else (sharedDrives.size * 68).dp)
+                    ) {
+                        items(sharedDrives, key = { it.id }) { drive ->
+                            val isCurrent = drive.id == activeRootId
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = if (isCurrent) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = drive.name,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Surface(
+                                                shape = RoundedCornerShape(6.dp),
+                                                color = Color(0x333B82F6)
+                                            ) {
+                                                Text(
+                                                    text = "Shared Drive",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color(0xFF3B82F6),
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            text = drive.id,
+                                            fontFamily = FontFamily.Monospace,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.outline
+                                        )
+                                    }
+                                    if (isCurrent) {
+                                        Text(
+                                            text = "Active",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                    } else {
+                                        Button(
+                                            onClick = { onSwitchFolder(drive.id) },
+                                            modifier = Modifier.height(34.dp)
+                                        ) {
+                                            Text("Select", fontSize = 12.sp)
+                                        }
                                     }
                                 }
                             }

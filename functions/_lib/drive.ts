@@ -61,9 +61,12 @@ export async function verifyFolderAccess(
   folderIdOrUrl: string,
 ): Promise<{ id: string; name: string } | null> {
   const folderId = extractFolderId(folderIdOrUrl);
+  if (folderId === "root") {
+    return { id: "root", name: "My Drive (Whole Drive)" };
+  }
   const res = await driveFetch(
     env,
-    `/drive/v3/files/${encodeURIComponent(folderId)}?fields=id,name,mimeType`,
+    `/drive/v3/files/${encodeURIComponent(folderId)}?fields=id,name,mimeType&supportsAllDrives=true`,
   );
   if (!res || !res.ok) {
     // Check if it's a Shared Drive (driveId)
@@ -918,4 +921,141 @@ export async function getStorageQuotaAndBreakdown(env: Env): Promise<{
     trashCount: trashStats.count,
   };
 }
+
+export interface DiscoveredSharedFolder {
+  id: string;
+  name: string;
+  sharedBy?: string;
+  canEdit: boolean;
+}
+
+export async function listSharedWithMeFolders(env: Env): Promise<DiscoveredSharedFolder[]> {
+  try {
+    const query = "sharedWithMe = true and mimeType = 'application/vnd.google-apps.folder' and trashed = false";
+    const fields = "files(id,name,owners(displayName,emailAddress),capabilities(canAddChildren))";
+    const response = await driveFetch(
+      env,
+      `/drive/v3/files?q=${encodeURIComponent(query)}&fields=${encodeURIComponent(fields)}&pageSize=50&orderBy=name asc`,
+    );
+    if (!response || !response.ok) return [];
+    const body = (await response.json()) as {
+      files?: Array<{
+        id: string;
+        name: string;
+        owners?: Array<{ displayName?: string; emailAddress?: string }>;
+        capabilities?: { canAddChildren?: boolean };
+      }>;
+    };
+    return (body.files ?? []).map((f) => {
+      const owner = f.owners?.[0];
+      let sharedBy: string | undefined;
+      if (owner?.displayName && owner?.emailAddress) {
+        sharedBy = `${owner.displayName} (${owner.emailAddress})`;
+      } else {
+        sharedBy = owner?.displayName || owner?.emailAddress;
+      }
+      return {
+        id: f.id,
+        name: f.name,
+        sharedBy,
+        canEdit: f.capabilities?.canAddChildren ?? false,
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
+export async function listSharedDrives(env: Env): Promise<Array<{ id: string; name: string }>> {
+  try {
+    const response = await driveFetch(env, "/drive/v3/drives?pageSize=50");
+    if (!response || !response.ok) return [];
+    const body = (await response.json()) as { drives?: Array<{ id: string; name: string }> };
+    return body.drives ?? [];
+  } catch {
+    return [];
+  }
+}
+
+export async function listSelfFolders(env: Env): Promise<DiscoveredSharedFolder[]> {
+  const selfFolders: DiscoveredSharedFolder[] = [
+    {
+      id: "root",
+      name: "My Drive (Whole Drive)",
+      sharedBy: "Personal Drive Root",
+      canEdit: true,
+    },
+  ];
+  try {
+    const query = "('root' in parents or 'me' in owners) and mimeType = 'application/vnd.google-apps.folder' and trashed = false";
+    const fields = "files(id,name,capabilities(canAddChildren))";
+    const response = await driveFetch(
+      env,
+      `/drive/v3/files?q=${encodeURIComponent(query)}&fields=${encodeURIComponent(fields)}&pageSize=50&orderBy=name asc&supportsAllDrives=true&includeItemsFromAllDrives=true`,
+    );
+    if (!response || !response.ok) return selfFolders;
+    const body = (await response.json()) as {
+      files?: Array<{
+        id: string;
+        name: string;
+        capabilities?: { canAddChildren?: boolean };
+      }>;
+    };
+    const seen = new Set<string>(["root"]);
+    for (const f of body.files ?? []) {
+      if (seen.has(f.id)) continue;
+      seen.add(f.id);
+      selfFolders.push({
+        id: f.id,
+        name: f.name,
+        sharedBy: "My Drive",
+        canEdit: f.capabilities?.canAddChildren ?? true,
+      });
+    }
+    return selfFolders;
+  } catch {
+    return selfFolders;
+  }
+}
+
+export async function searchAccessibleFolders(env: Env, searchQuery: string): Promise<DiscoveredSharedFolder[]> {
+  const trimmed = searchQuery.trim();
+  if (!trimmed) return [];
+  try {
+    const query = `mimeType = 'application/vnd.google-apps.folder' and trashed = false and name contains '${escapeDriveQuery(trimmed)}'`;
+    const fields = "files(id,name,owners(displayName,emailAddress),capabilities(canAddChildren))";
+    const response = await driveFetch(
+      env,
+      `/drive/v3/files?q=${encodeURIComponent(query)}&fields=${encodeURIComponent(fields)}&pageSize=30&orderBy=name asc&supportsAllDrives=true&includeItemsFromAllDrives=true`,
+    );
+    if (!response || !response.ok) return [];
+    const body = (await response.json()) as {
+      files?: Array<{
+        id: string;
+        name: string;
+        owners?: Array<{ displayName?: string; emailAddress?: string }>;
+        capabilities?: { canAddChildren?: boolean };
+      }>;
+    };
+    return (body.files ?? []).map((f) => {
+      const owner = f.owners?.[0];
+      let sharedBy: string | undefined;
+      if (owner?.displayName && owner?.emailAddress) {
+        sharedBy = `${owner.displayName} (${owner.emailAddress})`;
+      } else {
+        sharedBy = owner?.displayName || owner?.emailAddress || "Google Drive";
+      }
+      return {
+        id: f.id,
+        name: f.name,
+        sharedBy,
+        canEdit: f.capabilities?.canAddChildren ?? false,
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
+
 

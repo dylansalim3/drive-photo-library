@@ -756,6 +756,9 @@ fun DriveScreen(
             },
             onRefresh = {
                 viewModel.loadDriveConfig()
+            },
+            onSearch = { query ->
+                viewModel.loadDriveConfig(query)
             }
         )
     }
