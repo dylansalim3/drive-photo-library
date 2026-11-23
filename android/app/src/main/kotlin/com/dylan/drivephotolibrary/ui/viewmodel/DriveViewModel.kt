@@ -1,6 +1,7 @@
 package com.dylan.drivephotolibrary.ui.viewmodel
 
 import android.app.Application
+import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
@@ -10,6 +11,7 @@ import com.dylan.drivephotolibrary.data.model.Breadcrumb
 import com.dylan.drivephotolibrary.data.model.DriveFile
 import com.dylan.drivephotolibrary.data.model.DriveFolder
 import com.dylan.drivephotolibrary.data.repository.DriveRepository
+import com.dylan.drivephotolibrary.ui.util.Formatters
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,6 +22,53 @@ import kotlinx.coroutines.launch
 
 enum class ViewMode {
     GRID, LIST
+}
+
+enum class SortOption(val label: String) {
+    DATE_DESC("Date (Newest)"),
+    DATE_ASC("Date (Oldest)"),
+    NAME_ASC("Name (A → Z)"),
+    NAME_DESC("Name (Z → A)"),
+    SIZE_DESC("Size (Largest)"),
+    SIZE_ASC("Size (Smallest)")
+}
+
+enum class MediaTypeFilter(val label: String) {
+    ALL("All"),
+    PHOTOS("Photos"),
+    VIDEOS("Videos")
+}
+
+enum class DateGroupingMode(val label: String) {
+    GROUPED("Grouped"),
+    CONTINUOUS("Continuous")
+}
+
+data class MediaDateGroup(
+    val dateKey: String,
+    val dateLabel: String,
+    val files: List<DriveFile>,
+    val startIndex: Int
+)
+
+fun groupFilesByDate(files: List<DriveFile>): List<MediaDateGroup> {
+    val map = LinkedHashMap<String, MutableList<DriveFile>>()
+    for (file in files) {
+        val key = file.createdTime?.take(10) ?: file.modifiedTime?.take(10) ?: "earlier"
+        map.getOrPut(key) { mutableListOf() }.add(file)
+    }
+    var runningIndex = 0
+    return map.map { (key, groupFiles) ->
+        val label = Formatters.getDateGroupLabel(groupFiles.firstOrNull()?.createdTime ?: groupFiles.firstOrNull()?.modifiedTime)
+        val group = MediaDateGroup(
+            dateKey = key,
+            dateLabel = label,
+            files = groupFiles,
+            startIndex = runningIndex
+        )
+        runningIndex += groupFiles.size
+        group
+    }
 }
 
 data class DriveUiState(
@@ -35,16 +84,61 @@ data class DriveUiState(
     val isLoadingFiles: Boolean = false,
     val filesError: String? = null,
     val viewMode: ViewMode = ViewMode.GRID,
+    val sortOption: SortOption = SortOption.DATE_DESC,
+    val mediaTypeFilter: MediaTypeFilter = MediaTypeFilter.ALL,
+    val dateGrouping: DateGroupingMode = DateGroupingMode.GROUPED,
     val selectedFileIndex: Int? = null,
     val isUploading: Boolean = false,
     val uploadNotice: String? = null,
     val actionNotice: String? = null
-)
+) {
+    val processedFiles: List<DriveFile>
+        get() {
+            val filtered = when (mediaTypeFilter) {
+                MediaTypeFilter.ALL -> files
+                MediaTypeFilter.PHOTOS -> files.filter { !it.isVideo }
+                MediaTypeFilter.VIDEOS -> files.filter { it.isVideo }
+            }
+            return when (sortOption) {
+                SortOption.DATE_DESC -> filtered.sortedByDescending { it.createdTime ?: it.modifiedTime ?: "" }
+                SortOption.DATE_ASC -> filtered.sortedBy { it.createdTime ?: it.modifiedTime ?: "" }
+                SortOption.NAME_ASC -> filtered.sortedBy { it.name.lowercase() }
+                SortOption.NAME_DESC -> filtered.sortedByDescending { it.name.lowercase() }
+                SortOption.SIZE_DESC -> filtered.sortedByDescending { it.size?.toLongOrNull() ?: 0L }
+                SortOption.SIZE_ASC -> filtered.sortedBy { it.size?.toLongOrNull() ?: 0L }
+            }
+        }
+}
 
 class DriveViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = DriveRepository(application)
+    private val prefs = application.getSharedPreferences("drive_prefs", Context.MODE_PRIVATE)
 
-    private val _uiState = MutableStateFlow(DriveUiState())
+    private val initialViewMode = try {
+        ViewMode.valueOf(prefs.getString("view_mode", ViewMode.GRID.name) ?: ViewMode.GRID.name)
+    } catch (_: Exception) {
+        ViewMode.GRID
+    }
+
+    private val initialSortOption = try {
+        SortOption.valueOf(prefs.getString("sort_option", SortOption.DATE_DESC.name) ?: SortOption.DATE_DESC.name)
+    } catch (_: Exception) {
+        SortOption.DATE_DESC
+    }
+
+    private val initialDateGrouping = try {
+        DateGroupingMode.valueOf(prefs.getString("date_grouping", DateGroupingMode.GROUPED.name) ?: DateGroupingMode.GROUPED.name)
+    } catch (_: Exception) {
+        DateGroupingMode.GROUPED
+    }
+
+    private val _uiState = MutableStateFlow(
+        DriveUiState(
+            viewMode = initialViewMode,
+            sortOption = initialSortOption,
+            dateGrouping = initialDateGrouping
+        )
+    )
     val uiState: StateFlow<DriveUiState> = _uiState.asStateFlow()
 
     private var searchDebounceJob: Job? = null
@@ -108,7 +202,22 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setViewMode(mode: ViewMode) {
+        prefs.edit().putString("view_mode", mode.name).apply()
         _uiState.update { it.copy(viewMode = mode) }
+    }
+
+    fun setSortOption(option: SortOption) {
+        prefs.edit().putString("sort_option", option.name).apply()
+        _uiState.update { it.copy(sortOption = option) }
+    }
+
+    fun setMediaTypeFilter(filter: MediaTypeFilter) {
+        _uiState.update { it.copy(mediaTypeFilter = filter) }
+    }
+
+    fun setDateGrouping(mode: DateGroupingMode) {
+        prefs.edit().putString("date_grouping", mode.name).apply()
+        _uiState.update { it.copy(dateGrouping = mode) }
     }
 
     fun navigateToFolder(folderId: String?) {

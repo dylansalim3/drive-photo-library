@@ -26,8 +26,15 @@ import { BreadcrumbsBar } from "./components/drive/BreadcrumbsBar";
 import { FolderItems } from "./components/drive/FolderItems";
 import { MediaGrid } from "./components/drive/MediaGrid";
 import { MediaList } from "./components/drive/MediaList";
+import { MediaSortFilterBar } from "./components/drive/MediaSortFilterBar";
 import { MediaViewerModal } from "./components/drive/MediaViewerModal";
 import { MobileFabSheet } from "./components/drive/MobileFabSheet";
+import {
+  filterAndSortFiles,
+  type DateGroupingMode,
+  type MediaTypeFilter,
+  type SortOption,
+} from "./utils/dateGrouping";
 import {
   applyTheme,
   getStoredTheme,
@@ -310,6 +317,21 @@ export default function App() {
       return "grid";
     }
   });
+  const [sortOption, setSortOption] = useState<SortOption>(() => {
+    try {
+      return (localStorage.getItem("drive-sort-option") as SortOption) || "date-desc";
+    } catch {
+      return "date-desc";
+    }
+  });
+  const [mediaTypeFilter, setMediaTypeFilter] = useState<MediaTypeFilter>("all");
+  const [dateGrouping, setDateGrouping] = useState<DateGroupingMode>(() => {
+    try {
+      return (localStorage.getItem("drive-date-grouping") as DateGroupingMode) || "grouped";
+    } catch {
+      return "grouped";
+    }
+  });
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [uploadNotice, setUploadNotice] = useState<string | null>(null);
   const [marking, setMarking] = useState(false);
@@ -341,15 +363,31 @@ export default function App() {
     } catch {}
   };
 
+  const handleSortChange = (newSort: SortOption) => {
+    setSortOption(newSort);
+    try {
+      localStorage.setItem("drive-sort-option", newSort);
+    } catch {}
+  };
+
+  const handleDateGroupingChange = (mode: DateGroupingMode) => {
+    setDateGrouping(mode);
+    try {
+      localStorage.setItem("drive-date-grouping", mode);
+    } catch {}
+  };
+
+  const processedFiles = filterAndSortFiles(files, mediaTypeFilter, sortOption);
+
   const handleSelectFile = (file: DriveFile, index: number) => {
     setSelected(file);
     setSelectedIndex(index);
   };
 
   const handleViewerNavigate = (index: number) => {
-    if (index >= 0 && index < files.length) {
+    if (index >= 0 && index < processedFiles.length) {
       setSelectedIndex(index);
-      setSelected(files[index]);
+      setSelected(processedFiles[index]);
     }
   };
 
@@ -517,14 +555,14 @@ export default function App() {
       navigator as Navigator & { connection?: { saveData?: boolean } }
     ).connection;
     if (connection?.saveData) return;
-    const index = files.findIndex((file) => file.id === selected.id);
+    const index = processedFiles.findIndex((file) => file.id === selected.id);
     if (index === -1) return;
-    for (const neighbour of [files[index - 1], files[index + 1]]) {
+    for (const neighbour of [processedFiles[index - 1], processedFiles[index + 1]]) {
       if (!neighbour || neighbour.isVideo) continue;
       const image = new Image();
       image.src = `/api/media/file?id=${encodeURIComponent(neighbour.id)}`;
     }
-  }, [selected, files]);
+  }, [selected, processedFiles]);
 
   const addToQueue = useCallback((picked: File[]) => {
     setUploadNotice(null);
@@ -904,23 +942,33 @@ export default function App() {
           </div>
         ) : (
           files.length > 0 && (
-            <div>
-              <div className="flex items-center justify-between pb-2">
-                <p className="text-body-2-medium text-text-secondary">
-                  Files ({files.length})
-                </p>
-                <p className="text-caption-1-regular text-text-tertiary">
-                  Thumbnails only · Tap to inspect
-                </p>
-              </div>
+            <div className="flex flex-col gap-3">
+              <MediaSortFilterBar
+                mediaTypeFilter={mediaTypeFilter}
+                onMediaTypeFilterChange={setMediaTypeFilter}
+                sortOption={sortOption}
+                onSortOptionChange={handleSortChange}
+                dateGrouping={dateGrouping}
+                onDateGroupingChange={handleDateGroupingChange}
+                totalCount={files.length}
+              />
 
-              {viewMode === "grid" ? (
-                <MediaGrid files={files} onSelectFile={handleSelectFile} />
+              {processedFiles.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-border-button-default p-6 text-center text-text-secondary">
+                  <p className="text-body-medium">No matching files found for the selected filter.</p>
+                </div>
+              ) : viewMode === "grid" ? (
+                <MediaGrid
+                  files={processedFiles}
+                  onSelectFile={handleSelectFile}
+                  dateGrouping={dateGrouping}
+                />
               ) : (
                 <MediaList
-                  files={files}
+                  files={processedFiles}
                   onSelectFile={handleSelectFile}
                   onDownloadFile={handleSingleDownload}
+                  dateGrouping={dateGrouping}
                 />
               )}
             </div>
@@ -1075,7 +1123,7 @@ export default function App() {
       {/* Fullscreen Swipeable Media Lightbox / Inspector */}
       {selected && selectedIndex !== null && (
         <MediaViewerModal
-          files={files}
+          files={processedFiles}
           currentIndex={selectedIndex}
           onNavigate={handleViewerNavigate}
           onClose={handleCloseViewer}

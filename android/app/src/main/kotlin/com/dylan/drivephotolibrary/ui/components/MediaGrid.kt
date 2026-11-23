@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
@@ -40,13 +41,18 @@ import coil3.compose.AsyncImage
 import com.dylan.drivephotolibrary.data.model.DriveFile
 import com.dylan.drivephotolibrary.data.network.NetworkModule
 import com.dylan.drivephotolibrary.ui.util.Formatters
+import com.dylan.drivephotolibrary.ui.viewmodel.DateGroupingMode
+import com.dylan.drivephotolibrary.ui.viewmodel.groupFilesByDate
 
 @Composable
 fun MediaGrid(
     files: List<DriveFile>,
     onSelectFile: (DriveFile, Int) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    dateGrouping: DateGroupingMode = DateGroupingMode.GROUPED
 ) {
+    if (files.isEmpty()) return
+
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
         contentPadding = PaddingValues(16.dp),
@@ -54,12 +60,60 @@ fun MediaGrid(
         verticalArrangement = Arrangement.spacedBy(12.dp),
         modifier = modifier.fillMaxSize()
     ) {
-        itemsIndexed(files, key = { _, file -> file.id }) { index, file ->
-            MediaGridItem(
-                file = file,
-                onClick = { onSelectFile(file, index) }
-            )
+        if (dateGrouping == DateGroupingMode.GROUPED) {
+            val groups = groupFilesByDate(files)
+            groups.forEach { group ->
+                item(
+                    key = "header_${group.dateKey}",
+                    span = { GridItemSpan(maxLineSpan) }
+                ) {
+                    DateGroupHeader(
+                        dateLabel = group.dateLabel,
+                        count = group.files.size
+                    )
+                }
+                itemsIndexed(group.files, key = { _, file -> file.id }) { localIdx, file ->
+                    MediaGridItem(
+                        file = file,
+                        onClick = { onSelectFile(file, group.startIndex + localIdx) }
+                    )
+                }
+            }
+        } else {
+            itemsIndexed(files, key = { _, file -> file.id }) { index, file ->
+                MediaGridItem(
+                    file = file,
+                    onClick = { onSelectFile(file, index) }
+                )
+            }
         }
+    }
+}
+
+@Composable
+fun DateGroupHeader(
+    dateLabel: String,
+    count: Int,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp, bottom = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = dateLabel,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Text(
+            text = "$count ${if (count == 1) "item" else "items"}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.outline
+        )
     }
 }
 
@@ -110,60 +164,76 @@ fun MediaGridItem(
                         text = if (isNotSync) "Not-sync" else "Synced",
                         color = Color.White,
                         fontSize = 10.sp,
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
 
-            // Top-Right Media Type Pill
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(8.dp)
-                    .size(26.dp)
-                    .clip(CircleShape)
-                    .background(Color(0x99000000)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = if (file.isVideo) Icons.Default.PlayArrow else Icons.Default.Image,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(15.dp)
-                )
+            // Top-Right Media Type Pill (Video badge)
+            if (file.isVideo) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xCC000000),
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = "Video",
+                            tint = Color.White,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Text(
+                            text = "Video",
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
             }
 
             // Bottom Gradient Overlay with File Details
             Box(
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
                     .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
                     .background(
                         Brush.verticalGradient(
-                            colors = listOf(Color.Transparent, Color(0xCC000000))
+                            colors = listOf(Color.Transparent, Color(0xDD000000)),
+                            startY = 0f
                         )
                     )
-                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                    .padding(horizontal = 8.dp, vertical = 8.dp)
             ) {
                 Column {
                     Text(
                         text = file.name,
                         color = Color.White,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    val meta = listOfNotNull(
-                        Formatters.formatBytes(file.size),
-                        Formatters.formatDate(file.createdTime)
-                    ).joinToString(" · ")
-                    if (meta.isNotBlank()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
                         Text(
-                            text = meta,
+                            text = Formatters.formatBytes(file.size),
                             color = Color(0xCCFFFFFF),
-                            fontSize = 10.sp,
-                            maxLines = 1
+                            fontSize = 10.sp
+                        )
+                        Text(
+                            text = Formatters.formatDate(file.createdTime ?: file.modifiedTime),
+                            color = Color(0xCCFFFFFF),
+                            fontSize = 10.sp
                         )
                     }
                 }

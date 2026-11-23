@@ -50,6 +50,7 @@ import com.dylan.drivephotolibrary.ui.components.FolderGridCard
 import com.dylan.drivephotolibrary.ui.components.FolderListItem
 import com.dylan.drivephotolibrary.ui.components.MediaGrid
 import com.dylan.drivephotolibrary.ui.components.MediaList
+import com.dylan.drivephotolibrary.ui.components.MediaSortFilterBar
 import com.dylan.drivephotolibrary.ui.components.UploadFabSheet
 import com.dylan.drivephotolibrary.ui.viewmodel.DriveViewModel
 import com.dylan.drivephotolibrary.ui.viewmodel.ViewMode
@@ -276,25 +277,42 @@ fun DriveScreen(
                     }
                 } else {
                     if (uiState.files.isNotEmpty()) {
-                        Text(
-                            text = "Files (${uiState.files.size})",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp)
+                        MediaSortFilterBar(
+                            mediaTypeFilter = uiState.mediaTypeFilter,
+                            onMediaTypeFilterChange = { viewModel.setMediaTypeFilter(it) },
+                            sortOption = uiState.sortOption,
+                            onSortOptionChange = { viewModel.setSortOption(it) },
+                            dateGrouping = uiState.dateGrouping,
+                            onDateGroupingChange = { viewModel.setDateGrouping(it) },
+                            totalCount = uiState.files.size
                         )
 
-                        if (uiState.viewMode == ViewMode.GRID) {
+                        if (uiState.processedFiles.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(32.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "No matching files for selected filter",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        } else if (uiState.viewMode == ViewMode.GRID) {
                             MediaGrid(
-                                files = uiState.files,
+                                files = uiState.processedFiles,
                                 onSelectFile = { _, index -> viewModel.selectFile(index) },
+                                dateGrouping = uiState.dateGrouping,
                                 modifier = Modifier.weight(1f)
                             )
                         } else {
                             MediaList(
-                                files = uiState.files,
+                                files = uiState.processedFiles,
                                 onSelectFile = { _, index -> viewModel.selectFile(index) },
                                 onDownloadFile = { /* handled in viewer or single item */ },
+                                dateGrouping = uiState.dateGrouping,
                                 modifier = Modifier.weight(1f)
                             )
                         }
@@ -307,7 +325,7 @@ fun DriveScreen(
     // Fullscreen Swipeable Media Lightbox
     if (uiState.selectedFileIndex != null) {
         MediaViewerDialog(
-            files = uiState.files,
+            files = uiState.processedFiles,
             initialIndex = uiState.selectedFileIndex!!,
             onClose = { viewModel.selectFile(null) },
             onMarkSynced = { viewModel.markFileSynced(it) }

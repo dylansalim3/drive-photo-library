@@ -9,6 +9,7 @@ data class DriveFile(
     val mimeType: String = "",
     val size: String? = null,
     val createdTime: String? = null,
+    val modifiedTime: String? = null,
     val isVideo: Boolean = false,
     val syncStatus: String = "not-sync",
     val thumbnailLink: String? = null

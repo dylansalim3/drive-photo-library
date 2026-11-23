@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -36,24 +35,49 @@ import coil3.compose.AsyncImage
 import com.dylan.drivephotolibrary.data.model.DriveFile
 import com.dylan.drivephotolibrary.data.network.NetworkModule
 import com.dylan.drivephotolibrary.ui.util.Formatters
+import com.dylan.drivephotolibrary.ui.viewmodel.DateGroupingMode
+import com.dylan.drivephotolibrary.ui.viewmodel.groupFilesByDate
 
 @Composable
 fun MediaList(
     files: List<DriveFile>,
     onSelectFile: (DriveFile, Int) -> Unit,
     onDownloadFile: (DriveFile) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    dateGrouping: DateGroupingMode = DateGroupingMode.GROUPED
 ) {
+    if (files.isEmpty()) return
+
     LazyColumn(
         contentPadding = PaddingValues(vertical = 8.dp),
         modifier = modifier.fillMaxSize()
     ) {
-        itemsIndexed(files, key = { _, file -> file.id }) { index, file ->
-            MediaListItem(
-                file = file,
-                onClick = { onSelectFile(file, index) },
-                onDownload = { onDownloadFile(file) }
-            )
+        if (dateGrouping == DateGroupingMode.GROUPED) {
+            val groups = groupFilesByDate(files)
+            groups.forEach { group ->
+                item(key = "header_${group.dateKey}") {
+                    DateGroupHeader(
+                        dateLabel = group.dateLabel,
+                        count = group.files.size,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                }
+                itemsIndexed(group.files, key = { _, file -> file.id }) { localIdx, file ->
+                    MediaListItem(
+                        file = file,
+                        onClick = { onSelectFile(file, group.startIndex + localIdx) },
+                        onDownload = { onDownloadFile(file) }
+                    )
+                }
+            }
+        } else {
+            itemsIndexed(files, key = { _, file -> file.id }) { index, file ->
+                MediaListItem(
+                    file = file,
+                    onClick = { onSelectFile(file, index) },
+                    onDownload = { onDownloadFile(file) }
+                )
+            }
         }
     }
 }
@@ -98,6 +122,7 @@ fun MediaListItem(
             )
         }
 
+        // File Metadata
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -105,26 +130,26 @@ fun MediaListItem(
         ) {
             Text(
                 text = file.name,
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            val meta = listOfNotNull(
-                Formatters.formatBytes(file.size),
-                Formatters.formatDate(file.createdTime)
-            ).joinToString(" · ")
-            if (meta.isNotBlank()) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(top = 2.dp)
+            ) {
                 Text(
-                    text = meta,
+                    text = "${Formatters.formatBytes(file.size)} • ${Formatters.formatDate(file.createdTime ?: file.modifiedTime)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
 
+        // Sync Status Tag
         SuggestionChip(
-            onClick = { },
+            onClick = { /* info */ },
             label = {
                 Text(
                     text = if (isNotSync) "Not-sync" else "Synced",
@@ -132,12 +157,12 @@ fun MediaListItem(
                 )
             },
             colors = SuggestionChipDefaults.suggestionChipColors(
-                containerColor = if (isNotSync) Color(0xFFFFF3E0) else Color(0xFFE8F5E9),
-                labelColor = if (isNotSync) Color(0xFFE65100) else Color(0xFF2E7D32)
-            ),
-            modifier = Modifier.height(28.dp)
+                containerColor = if (isNotSync) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.secondaryContainer,
+                labelColor = if (isNotSync) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSecondaryContainer
+            )
         )
 
+        // Download Action
         IconButton(onClick = onDownload) {
             Icon(
                 imageVector = Icons.Default.Download,
