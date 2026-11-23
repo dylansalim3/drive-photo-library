@@ -29,6 +29,7 @@ import { MediaList } from "./components/drive/MediaList";
 import { MediaSortFilterBar } from "./components/drive/MediaSortFilterBar";
 import { MediaViewerModal } from "./components/drive/MediaViewerModal";
 import { MobileFabSheet } from "./components/drive/MobileFabSheet";
+import { UserManagerSection } from "./components/drive/UserManagerSection";
 import {
   filterAndSortFiles,
   type DateGroupingMode,
@@ -985,7 +986,7 @@ export default function App() {
       {/* Settings Modal */}
       {showSettings && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs">
-          <div className="relative w-full max-w-md rounded-3xl border border-border-button-default bg-background-primary-default p-6 shadow-2xl">
+          <div className="relative w-full max-w-md rounded-3xl border border-border-button-default bg-background-primary-default p-6 shadow-2xl max-h-[85vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-4 border-b border-border-button-default">
               <div className="flex items-center gap-2">
                 <RiSettings3Line className="size-5 text-text-primary" />
@@ -1084,6 +1085,11 @@ export default function App() {
                   </Button>
                 </div>
               </div>
+
+              <Divider />
+
+              {/* User Accounts Management (D1) */}
+              <UserManagerSection status={status} />
 
               <Divider />
 

@@ -1,5 +1,6 @@
 import { sha256Hex } from "./crypto";
 import type { Env, PagesContext } from "./types";
+import { findUserByUsername, hasAnyUsers } from "./users";
 
 export function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
@@ -60,6 +61,31 @@ export async function requireSession(context: PagesContext): Promise<string | Re
   return row.username;
 }
 
+export interface SessionUser {
+  username: string;
+  role: string;
+}
+
+export async function requireSessionUser(context: PagesContext): Promise<SessionUser | Response> {
+  const usernameOrResponse = await requireSession(context);
+  if (typeof usernameOrResponse !== "string") return usernameOrResponse;
+
+  const user = await findUserByUsername(context.env.DB, usernameOrResponse);
+  return {
+    username: usernameOrResponse,
+    role: user?.role ?? (usernameOrResponse === context.env.APP_USER ? "admin" : "user"),
+  };
+}
+
+export async function requireAdmin(context: PagesContext): Promise<SessionUser | Response> {
+  const userOrResponse = await requireSessionUser(context);
+  if ("status" in userOrResponse) return userOrResponse;
+  if (userOrResponse.role !== "admin") {
+    return errorResponse("FORBIDDEN", "Admin privilege required for this action.", 403);
+  }
+  return userOrResponse;
+}
+
 export async function destroySession(context: PagesContext): Promise<string> {
   const token = parseCookies(context.request)["dpl_session"];
   if (token) {
@@ -69,8 +95,9 @@ export async function destroySession(context: PagesContext): Promise<string> {
   return "dpl_session=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0";
 }
 
-export function appLoginConfigured(env: Env): boolean {
-  return Boolean(env.APP_USER && env.APP_PASS);
+export async function appLoginConfigured(env: Env): Promise<boolean> {
+  if (Boolean(env.APP_USER && env.APP_PASS)) return true;
+  return hasAnyUsers(env.DB);
 }
 
 export function googleConfigured(env: Env): boolean {

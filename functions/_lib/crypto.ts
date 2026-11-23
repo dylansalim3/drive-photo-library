@@ -62,3 +62,56 @@ export async function decryptText(clientSecret: string, encoded: string): Promis
   const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
   return decoder.decode(plaintext);
 }
+
+function toHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function fromHex(hex: string): Uint8Array {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes[i / 2] = parseInt(hex.slice(i, i + 2), 16);
+  }
+  return bytes;
+}
+
+export async function hashPassword(
+  password: string,
+  saltHex?: string,
+): Promise<{ hash: string; salt: string }> {
+  const saltBytes = saltHex ? fromHex(saltHex) : crypto.getRandomValues(new Uint8Array(16));
+  const salt = toHex(saltBytes);
+
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(password),
+    { name: "PBKDF2" },
+    false,
+    ["deriveBits"],
+  );
+
+  const derivedBits = await crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      salt: saltBytes,
+      iterations: 100_000,
+      hash: "SHA-256",
+    },
+    keyMaterial,
+    256,
+  );
+
+  const hash = toHex(new Uint8Array(derivedBits));
+  return { hash, salt };
+}
+
+export async function verifyPassword(
+  password: string,
+  expectedHash: string,
+  saltHex: string,
+): Promise<boolean> {
+  const { hash } = await hashPassword(password, saltHex);
+  return timingSafeEqual(hash, expectedHash);
+}

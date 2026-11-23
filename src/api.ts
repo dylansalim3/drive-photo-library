@@ -18,7 +18,15 @@ export interface AuthStatus {
   driveConnected: boolean;
   driveError?: string;
   username?: string;
+  role?: string;
   rootFolderId?: string;
+}
+
+export interface AppUser {
+  id: number;
+  username: string;
+  role: string;
+  createdAt: number;
 }
 
 export interface Breadcrumb {
@@ -200,4 +208,36 @@ export function formatDate(value?: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+export async function listAppUsers(): Promise<AppUser[]> {
+  const data = await request<{ ok: boolean; users: AppUser[] }>("/api/users");
+  return data.users;
+}
+
+export async function createAppUser(
+  username: string,
+  pass: string,
+  role: string = "user",
+): Promise<AppUser> {
+  const data = await request<{ ok: boolean; user: AppUser }>("/api/users", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password: pass, role }),
+  });
+  return data.user;
+}
+
+export async function deleteAppUser(id: number): Promise<void> {
+  await request<{ ok: boolean }>(`/api/users/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  await request<{ ok: boolean }>("/api/users/change-password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
 }
