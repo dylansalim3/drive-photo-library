@@ -19,7 +19,24 @@ export interface AuthStatus {
   driveError?: string;
 }
 
+export interface Breadcrumb {
+  id: string;
+  name: string;
+}
+
+export interface DriveFolder {
+  id: string;
+  name: string;
+  parentId?: string;
+  itemCount?: number;
+  syncStatus: "not-sync" | "synced" | "unknown";
+}
+
 export interface FilesResponse {
+  currentFolderId: string;
+  currentFolderName: string;
+  breadcrumbs: Breadcrumb[];
+  subfolders: DriveFolder[];
   files: DriveFile[];
   filter: Filter;
   inboxFolder: string;
@@ -91,10 +108,29 @@ export async function logout(): Promise<{ ok: boolean }> {
   return request<{ ok: boolean }>("/api/auth/logout", { method: "POST" });
 }
 
-export async function listFiles(filter: Filter, search: string): Promise<FilesResponse> {
+export async function listFiles(filter: Filter, search: string, folderId?: string): Promise<FilesResponse> {
   const params = new URLSearchParams({ filter });
   if (search.trim()) params.set("search", search.trim());
+  if (folderId) params.set("folderId", folderId);
   return request<FilesResponse>(`/api/files?${params.toString()}`);
+}
+
+export async function createFolder(
+  nameOrPath: string,
+  parentId?: string,
+): Promise<{ ok: boolean; folder: DriveFolder }> {
+  const isPath = nameOrPath.includes("/");
+  return request<{ ok: boolean; folder: DriveFolder }>("/api/folders", {
+    method: "POST",
+    body: JSON.stringify(isPath ? { path: nameOrPath, parentId } : { name: nameOrPath, parentId }),
+  });
+}
+
+export async function markFolderSynced(id: string): Promise<{ ok: boolean; syncStatus: string; movedCount: number }> {
+  return request<{ ok: boolean; syncStatus: string; movedCount: number }>(
+    `/api/folders/${encodeURIComponent(id)}/mark-synced`,
+    { method: "POST" },
+  );
 }
 
 export async function getManifest(): Promise<ManifestResponse> {
@@ -111,10 +147,14 @@ export async function markSynced(id: string): Promise<{ ok: boolean; syncStatus:
 export function uploadFile(
   file: File,
   onProgress: (percent: number, processing: boolean) => void,
+  folderId?: string,
+  folderPath?: string,
 ): Promise<{ ok: boolean; file: DriveFile }> {
   return new Promise((resolve, reject) => {
     const form = new FormData();
     form.append("file", file);
+    if (folderId) form.append("folderId", folderId);
+    if (folderPath) form.append("folderPath", folderPath);
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/upload");
     xhr.withCredentials = true;
