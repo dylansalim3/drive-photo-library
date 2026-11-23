@@ -2,14 +2,18 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 import {
   RiCheckLine,
   RiCloseLine,
+  RiComputerLine,
   RiDownloadLine,
   RiFolderAddLine,
   RiFolderLine,
   RiImageLine,
   RiLogoutBoxLine,
+  RiMoonLine,
   RiRefreshLine,
   RiSearchLine,
+  RiSettings3Line,
   RiStopCircleLine,
+  RiSunLine,
   RiVideoLine,
 } from "@remixicon/react";
 import { Avatar } from "@/components/base/avatar/avatar";
@@ -19,6 +23,14 @@ import { Divider } from "@/components/base/divider/divider";
 import { FileUpload } from "@/components/base/file-upload/file-upload";
 import { Input } from "@/components/base/input/input";
 import { Tab, TabList, Tabs } from "@/components/base/tabs/tabs";
+import { cx } from "@/utils/cx";
+import {
+  applyTheme,
+  getStoredTheme,
+  initThemeListener,
+  setStoredTheme,
+  type ThemeMode,
+} from "./utils/theme";
 import {
   ApiError,
   createFolder,
@@ -74,7 +86,69 @@ function Notice({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-function LoginScreen({ status, onLoggedIn }: { status: AuthStatus; onLoggedIn: () => void }) {
+function ThemeToggleBar({
+  themeMode,
+  onThemeChange,
+}: {
+  themeMode: ThemeMode;
+  onThemeChange: (mode: ThemeMode) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1 rounded-2xl border border-border-button-default bg-background-primary-default p-1">
+      <button
+        type="button"
+        title="Light theme"
+        onClick={() => onThemeChange("light")}
+        className={cx(
+          "flex size-8 items-center justify-center rounded-xl transition-colors outline-none",
+          themeMode === "light"
+            ? "bg-background-secondary-default text-text-primary shadow-sm"
+            : "text-text-secondary hover:text-text-primary",
+        )}
+      >
+        <RiSunLine className="size-4" />
+      </button>
+      <button
+        type="button"
+        title="Dark theme"
+        onClick={() => onThemeChange("dark")}
+        className={cx(
+          "flex size-8 items-center justify-center rounded-xl transition-colors outline-none",
+          themeMode === "dark"
+            ? "bg-background-secondary-default text-text-primary shadow-sm"
+            : "text-text-secondary hover:text-text-primary",
+        )}
+      >
+        <RiMoonLine className="size-4" />
+      </button>
+      <button
+        type="button"
+        title="Follow system"
+        onClick={() => onThemeChange("system")}
+        className={cx(
+          "flex size-8 items-center justify-center rounded-xl transition-colors outline-none",
+          themeMode === "system"
+            ? "bg-background-secondary-default text-text-primary shadow-sm"
+            : "text-text-secondary hover:text-text-primary",
+        )}
+      >
+        <RiComputerLine className="size-4" />
+      </button>
+    </div>
+  );
+}
+
+function LoginScreen({
+  status,
+  onLoggedIn,
+  themeMode,
+  onThemeChange,
+}: {
+  status: AuthStatus;
+  onLoggedIn: () => void;
+  themeMode: ThemeMode;
+  onThemeChange: (mode: ThemeMode) => void;
+}) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -104,11 +178,13 @@ function LoginScreen({ status, onLoggedIn }: { status: AuthStatus; onLoggedIn: (
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-4 py-8">
-      <p className="text-title-1-medium text-text-primary">Drive Photo Library</p>
-      <p className="mt-2 text-body-regular text-text-secondary">
-        Stream-only viewer for your Drive photos and videos. Nothing downloads to this phone unless you
-        tap Download.
-      </p>
+      <div className="flex items-center justify-between pb-4">
+        <div>
+          <p className="text-title-1-medium text-text-primary">Drive Photo Library</p>
+          <p className="mt-1 text-body-2-regular text-text-secondary">Stream-only · no auto-download</p>
+        </div>
+        <ThemeToggleBar themeMode={themeMode} onThemeChange={onThemeChange} />
+      </div>
       <form onSubmit={submit} className="mt-6 flex flex-col gap-4">
         <Input
           label="Username"
@@ -144,16 +220,28 @@ function LoginScreen({ status, onLoggedIn }: { status: AuthStatus; onLoggedIn: (
   );
 }
 
-function DriveSetupScreen({ status, onRetry }: { status: AuthStatus; onRetry: () => void }) {
+function DriveSetupScreen({
+  status,
+  onRetry,
+  themeMode,
+  onThemeChange,
+}: {
+  status: AuthStatus;
+  onRetry: () => void;
+  themeMode: ThemeMode;
+  onThemeChange: (mode: ThemeMode) => void;
+}) {
   const notConfigured = status.driveError === "NOT_CONFIGURED";
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-4 py-8">
-      <p className="text-title-1-medium text-text-primary">Connect Google Drive</p>
-      <p className="mt-2 text-body-regular text-text-secondary">
-        You are signed in, but no Drive library is connected yet. The library appears only after a real
-        Drive connection — this screen does not show sample photos.
-      </p>
-      <div className="mt-6 flex flex-col gap-4">
+      <div className="flex items-center justify-between pb-4">
+        <div>
+          <p className="text-title-1-medium text-text-primary">Connect Google Drive</p>
+          <p className="mt-1 text-body-2-regular text-text-secondary">Google OAuth authorization</p>
+        </div>
+        <ThemeToggleBar themeMode={themeMode} onThemeChange={onThemeChange} />
+      </div>
+      <div className="mt-4 flex flex-col gap-4">
         {notConfigured ? (
           <Notice title="Google credentials not configured">
             <p>
@@ -168,9 +256,7 @@ function DriveSetupScreen({ status, onRetry }: { status: AuthStatus; onRetry: ()
           <Notice title="Drive not connected">
             <p>Connect your Google account to read and upload to your Drive Travel folders.</p>
             <p>
-              The app asks for Drive access because photos batch-uploaded outside this app still need
-              to be readable here. Google tokens stay on the server; the browser only holds a session
-              cookie.
+              Google tokens stay on the server; the browser only holds an encrypted session cookie.
             </p>
           </Notice>
         )}
@@ -219,6 +305,10 @@ export default function App() {
   const [manifestBusy, setManifestBusy] = useState(false);
   const [manifestNotice, setManifestNotice] = useState<string | null>(null);
 
+  // Settings & Theme
+  const [showSettings, setShowSettings] = useState(false);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => getStoredTheme());
+
   // New folder dialog state
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
@@ -232,6 +322,18 @@ export default function App() {
 
   const queueProcessing = useRef(false);
   const folderCache = useRef<Record<string, string>>({});
+
+  useEffect(() => {
+    applyTheme(themeMode);
+    return initThemeListener(() => {
+      applyTheme(getStoredTheme());
+    });
+  }, [themeMode]);
+
+  const handleThemeChange = (mode: ThemeMode) => {
+    setThemeMode(mode);
+    setStoredTheme(mode);
+  };
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -492,11 +594,25 @@ export default function App() {
   }
 
   if (!status.authenticated) {
-    return <LoginScreen status={status} onLoggedIn={() => void refreshStatus()} />;
+    return (
+      <LoginScreen
+        status={status}
+        onLoggedIn={() => void refreshStatus()}
+        themeMode={themeMode}
+        onThemeChange={handleThemeChange}
+      />
+    );
   }
 
   if (!status.driveConnected) {
-    return <DriveSetupScreen status={status} onRetry={() => void refreshStatus()} />;
+    return (
+      <DriveSetupScreen
+        status={status}
+        onRetry={() => void refreshStatus()}
+        themeMode={themeMode}
+        onThemeChange={handleThemeChange}
+      />
+    );
   }
 
   const confirmedCount = queue.filter((item) => item.status === "confirmed").length;
@@ -507,22 +623,32 @@ export default function App() {
     <main className="mx-auto flex min-h-dvh w-full max-w-3xl flex-col px-4 pb-8 pt-4">
       <header className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <Avatar initials="D" size="md" />
+          <Avatar initials={status.username ? status.username.slice(0, 1).toUpperCase() : "D"} size="md" />
           <div>
             <p className="text-title-2-medium text-text-primary">Drive Photo Library</p>
             <p className="text-body-2-regular text-text-secondary">Stream-only · no auto-download</p>
           </div>
         </div>
-        <Button
-          variant="ghost"
-          size="small"
-          iconOnly
-          leadingIcon={RiLogoutBoxLine}
-          aria-label="Sign out"
-          onClick={() => {
-            void logout().finally(() => void refreshStatus());
-          }}
-        />
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="small"
+            iconOnly
+            leadingIcon={RiSettings3Line}
+            aria-label="Settings"
+            onClick={() => setShowSettings(true)}
+          />
+          <Button
+            variant="ghost"
+            size="small"
+            iconOnly
+            leadingIcon={RiLogoutBoxLine}
+            aria-label="Sign out"
+            onClick={() => {
+              void logout().finally(() => void refreshStatus());
+            }}
+          />
+        </div>
       </header>
 
       <Divider className="my-4" />
@@ -847,6 +973,144 @@ export default function App() {
           </>
         )}
       </section>
+
+      {/* Settings Modal */}
+      {showSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs">
+          <div className="relative w-full max-w-md rounded-3xl border border-border-button-default bg-background-primary-default p-6 shadow-2xl">
+            <div className="flex items-center justify-between pb-4 border-b border-border-button-default">
+              <div className="flex items-center gap-2">
+                <RiSettings3Line className="size-5 text-text-primary" />
+                <p className="text-title-3-semibold text-text-primary">Settings</p>
+              </div>
+              <Button
+                variant="ghost"
+                size="small"
+                iconOnly
+                leadingIcon={RiCloseLine}
+                aria-label="Close settings"
+                onClick={() => setShowSettings(false)}
+              />
+            </div>
+
+            <div className="mt-5 flex flex-col gap-5">
+              {/* Theme Settings */}
+              <div>
+                <p className="text-body-medium font-semibold text-text-primary">Theme</p>
+                <p className="text-body-2-regular text-text-secondary mt-0.5">
+                  Select your appearance preference
+                </p>
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleThemeChange("light")}
+                    className={cx(
+                      "flex flex-col items-center justify-center gap-1.5 p-3 rounded-2xl border text-body-2-medium transition-colors outline-none",
+                      themeMode === "light"
+                        ? "border-accent-500 bg-background-secondary-default text-text-primary ring-2 ring-accent-500/20"
+                        : "border-border-button-default hover:bg-background-secondary-default text-text-secondary",
+                    )}
+                  >
+                    <RiSunLine className="size-5" />
+                    <span>Light</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleThemeChange("dark")}
+                    className={cx(
+                      "flex flex-col items-center justify-center gap-1.5 p-3 rounded-2xl border text-body-2-medium transition-colors outline-none",
+                      themeMode === "dark"
+                        ? "border-accent-500 bg-background-secondary-default text-text-primary ring-2 ring-accent-500/20"
+                        : "border-border-button-default hover:bg-background-secondary-default text-text-secondary",
+                    )}
+                  >
+                    <RiMoonLine className="size-5" />
+                    <span>Dark</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleThemeChange("system")}
+                    className={cx(
+                      "flex flex-col items-center justify-center gap-1.5 p-3 rounded-2xl border text-body-2-medium transition-colors outline-none",
+                      themeMode === "system"
+                        ? "border-accent-500 bg-background-secondary-default text-text-primary ring-2 ring-accent-500/20"
+                        : "border-border-button-default hover:bg-background-secondary-default text-text-secondary",
+                    )}
+                  >
+                    <RiComputerLine className="size-5" />
+                    <span>System</span>
+                  </button>
+                </div>
+              </div>
+
+              <Divider />
+
+              {/* Account Session Status */}
+              <div>
+                <p className="text-body-medium font-semibold text-text-primary">Account Session</p>
+                <div className="mt-2 flex items-center justify-between p-3 rounded-2xl border border-border-button-default bg-background-secondary-default">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Avatar initials={status.username ? status.username.slice(0, 1).toUpperCase() : "U"} size="sm" />
+                    <div className="min-w-0">
+                      <p className="truncate text-body-medium font-medium text-text-primary">
+                        {status.username ? status.username : "Signed in"}
+                      </p>
+                      <p className="text-caption-1-regular text-text-secondary">Active web session</p>
+                    </div>
+                  </div>
+                  <Chip variant="caption" color="lime">Active</Chip>
+                </div>
+                <div className="mt-3 flex justify-end">
+                  <Button
+                    variant="secondary"
+                    size="small"
+                    leadingIcon={RiLogoutBoxLine}
+                    onClick={() => {
+                      void logout().finally(() => {
+                        setShowSettings(false);
+                        void refreshStatus();
+                      });
+                    }}
+                  >
+                    Sign out
+                  </Button>
+                </div>
+              </div>
+
+              <Divider />
+
+              {/* Google Drive Status */}
+              <div>
+                <p className="text-body-medium font-semibold text-text-primary">Google Drive Connection</p>
+                <div className="mt-2 flex items-center justify-between p-3 rounded-2xl border border-border-button-default bg-background-secondary-default">
+                  <div className="min-w-0">
+                    <p className="text-body-medium text-text-primary">Drive API</p>
+                    <p className="text-caption-1-regular text-text-secondary truncate">
+                      Root: {status.rootFolderId ?? "1XaVTeYnE79682ZTJzi7FYOH3D5siPZTb"}
+                    </p>
+                  </div>
+                  <Chip variant="caption" color={status.driveConnected ? "lime" : "rose"}>
+                    {status.driveConnected ? "Connected" : "Disconnected"}
+                  </Chip>
+                </div>
+                {!status.driveConnected && (
+                  <div className="mt-3">
+                    <Button
+                      variant="primary"
+                      size="small"
+                      onClick={() => {
+                        window.location.href = "/api/auth/drive/connect";
+                      }}
+                    >
+                      Connect Drive
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {selected && (
         <div className="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-background-full">
