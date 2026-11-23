@@ -12,6 +12,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Checklist
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Person
@@ -40,12 +42,16 @@ import com.dylan.drivephotolibrary.ui.viewmodel.SortOption
 
 @Composable
 fun MediaSortFilterBar(
+    syncFilter: String,
+    onSyncFilterChange: (String) -> Unit,
     mediaTypeFilter: MediaTypeFilter,
     onMediaTypeFilterChange: (MediaTypeFilter) -> Unit,
     sortOption: SortOption,
     onSortOptionChange: (SortOption) -> Unit,
     dateGrouping: DateGroupingMode,
     onDateGroupingChange: (DateGroupingMode) -> Unit,
+    isSelectMode: Boolean,
+    onToggleSelectMode: () -> Unit,
     totalCount: Int,
     modifier: Modifier = Modifier,
     uploaderFilter: String? = null,
@@ -53,6 +59,7 @@ fun MediaSortFilterBar(
     uploaders: List<String> = emptyList()
 ) {
     var sortMenuExpanded by remember { mutableStateOf(false) }
+    var syncMenuExpanded by remember { mutableStateOf(false) }
     var uploaderMenuExpanded by remember { mutableStateOf(false) }
 
     Row(
@@ -62,11 +69,13 @@ fun MediaSortFilterBar(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Media Type & Uploader Filter Chips
+        // Media Type & Uploader Filter Chips (Scrollable)
         Row(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.weight(1f, fill = false).horizontalScroll(rememberScrollState())
+            modifier = Modifier
+                .weight(1f, fill = false)
+                .horizontalScroll(rememberScrollState())
         ) {
             FilterChip(
                 selected = mediaTypeFilter == MediaTypeFilter.ALL,
@@ -169,12 +178,12 @@ fun MediaSortFilterBar(
             }
         }
 
-        // Right side: Sort Dropdown & Grouping Toggle
+        // Right side: Date Sorting + Sync Filter Dropdown + Grouping Toggle + Select Toggle
         Row(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Sort Dropdown
+            // 1. Sort Dropdown
             Box {
                 IconButton(
                     onClick = { sortMenuExpanded = true },
@@ -182,7 +191,7 @@ fun MediaSortFilterBar(
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.Sort,
-                        contentDescription = "Sort media: ${sortOption.label}",
+                        contentDescription = "Sort: ${sortOption.label}",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(20.dp)
                     )
@@ -218,7 +227,55 @@ fun MediaSortFilterBar(
                 }
             }
 
-            // Date Grouping Toggle (Grouped 📅 vs Continuous ▦)
+            // 2. Sync Filter Dropdown (small button right side of date sorting)
+            Box {
+                IconButton(
+                    onClick = { syncMenuExpanded = true },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FilterList,
+                        contentDescription = "Sync Filter: $syncFilter",
+                        tint = if (syncFilter != "all") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                DropdownMenu(
+                    expanded = syncMenuExpanded,
+                    onDismissRequest = { syncMenuExpanded = false }
+                ) {
+                    listOf(
+                        "not-sync" to "Pending (Not-sync)",
+                        "synced" to "Synced only",
+                        "all" to "All files"
+                    ).forEach { (key, label) ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = label,
+                                    fontWeight = if (syncFilter == key) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
+                            trailingIcon = if (syncFilter == key) {
+                                {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            } else null,
+                            onClick = {
+                                onSyncFilterChange(key)
+                                syncMenuExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
+
+            // 3. Date Grouping Toggle (Grouped 📅 vs Continuous ▦)
             IconButton(
                 onClick = {
                     val nextMode = if (dateGrouping == DateGroupingMode.GROUPED) {
@@ -236,12 +293,25 @@ fun MediaSortFilterBar(
                     } else {
                         Icons.Default.GridView
                     },
-                    contentDescription = "Toggle grouping: currently ${dateGrouping.label}",
+                    contentDescription = "Grouping: ${dateGrouping.label}",
                     tint = if (dateGrouping == DateGroupingMode.GROUPED) {
                         MaterialTheme.colorScheme.primary
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            // 4. Select Mode Toggle
+            IconButton(
+                onClick = onToggleSelectMode,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Checklist,
+                    contentDescription = "Toggle multi-selection mode",
+                    tint = if (isSelectMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(20.dp)
                 )
             }

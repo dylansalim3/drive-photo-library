@@ -38,6 +38,24 @@ data class FilesResponse(
 )
 
 @Serializable
+data class TreeItem(
+    val id: String,
+    val name: String,
+    val path: String,
+    val size: String? = null,
+    val mimeType: String = ""
+)
+
+@Serializable
+data class TreeResponse(
+    val ok: Boolean = true,
+    val folderId: String? = null,
+    val folderName: String? = null,
+    val count: Int = 0,
+    val items: List<TreeItem> = emptyList()
+)
+
+@Serializable
 data class AuthStatus(
     val configured: Boolean = false,
     val authenticated: Boolean = false,

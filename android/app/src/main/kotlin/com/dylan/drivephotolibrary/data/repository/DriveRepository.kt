@@ -10,6 +10,7 @@ import com.dylan.drivephotolibrary.data.model.CreateFolderResponse
 import com.dylan.drivephotolibrary.data.model.FilesResponse
 import com.dylan.drivephotolibrary.data.model.LoginRequest
 import com.dylan.drivephotolibrary.data.model.LoginResponse
+import com.dylan.drivephotolibrary.data.model.TreeResponse
 import com.dylan.drivephotolibrary.data.network.NetworkModule
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -53,6 +54,17 @@ class DriveRepository(private val context: Context) {
     ): Result<FilesResponse> = withContext(Dispatchers.IO) {
         try {
             Result.success(api.listFiles(filter, search, folderId))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getTree(
+        folderId: String? = null,
+        filter: String? = null
+    ): Result<TreeResponse> = withContext(Dispatchers.IO) {
+        try {
+            Result.success(api.getTree(folderId, filter))
         } catch (e: Exception) {
             Result.failure(e)
         }

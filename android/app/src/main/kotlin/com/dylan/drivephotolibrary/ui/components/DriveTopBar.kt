@@ -13,8 +13,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.GridView
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -46,6 +46,7 @@ fun DriveTopBar(
     onViewModeChange: (ViewMode) -> Unit,
     username: String?,
     onLogout: () -> Unit,
+    onOpenVacationSync: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -109,6 +110,15 @@ fun DriveTopBar(
                     imageVector = if (viewMode == ViewMode.GRID) Icons.AutoMirrored.Filled.ViewList else Icons.Default.GridView,
                     contentDescription = if (viewMode == ViewMode.GRID) "Switch to list view" else "Switch to grid view",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            // Vacation Sync Center Quick Action Button
+            IconButton(onClick = onOpenVacationSync) {
+                Icon(
+                    imageVector = Icons.Default.CloudDownload,
+                    contentDescription = "Vacation Sync Center",
+                    tint = MaterialTheme.colorScheme.primary
                 )
             }
 

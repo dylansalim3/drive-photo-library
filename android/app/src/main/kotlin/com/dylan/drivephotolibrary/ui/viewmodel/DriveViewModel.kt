@@ -10,7 +10,9 @@ import com.dylan.drivephotolibrary.data.model.AuthStatus
 import com.dylan.drivephotolibrary.data.model.Breadcrumb
 import com.dylan.drivephotolibrary.data.model.DriveFile
 import com.dylan.drivephotolibrary.data.model.DriveFolder
+import com.dylan.drivephotolibrary.data.model.TreeItem
 import com.dylan.drivephotolibrary.data.repository.DriveRepository
+import com.dylan.drivephotolibrary.data.util.ZipDownloader
 import com.dylan.drivephotolibrary.ui.util.Formatters
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -91,7 +93,15 @@ data class DriveUiState(
     val selectedFileIndex: Int? = null,
     val isUploading: Boolean = false,
     val uploadNotice: String? = null,
-    val actionNotice: String? = null
+    val actionNotice: String? = null,
+    val isSelectMode: Boolean = false,
+    val selectedFileIds: Set<String> = emptySet(),
+    val selectedFolderIds: Set<String> = emptySet(),
+    val showVacationSyncSheet: Boolean = false,
+    val isDownloadingZip: Boolean = false,
+    val showZipProgressDialog: Boolean = false,
+    val zipDownloadProgress: ZipDownloader.Progress? = null,
+    val isSyncingAll: Boolean = false
 ) {
     val uploaders: List<String>
         get() = files.mapNotNull { it.uploadedBy }.distinct()
@@ -357,5 +367,289 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearNotices() {
         _uiState.update { it.copy(actionNotice = null, uploadNotice = null) }
+    }
+
+    fun toggleSelectMode() {
+        _uiState.update { curr ->
+            val newMode = !curr.isSelectMode
+            curr.copy(
+                isSelectMode = newMode,
+                selectedFileIds = if (!newMode) emptySet() else curr.selectedFileIds,
+                selectedFolderIds = if (!newMode) emptySet() else curr.selectedFolderIds
+            )
+        }
+    }
+
+    fun toggleFileSelection(fileId: String) {
+        _uiState.update { curr ->
+            val set = curr.selectedFileIds.toMutableSet()
+            if (set.contains(fileId)) set.remove(fileId) else set.add(fileId)
+            curr.copy(selectedFileIds = set, isSelectMode = true)
+        }
+    }
+
+    fun toggleFolderSelection(folderId: String) {
+        _uiState.update { curr ->
+            val set = curr.selectedFolderIds.toMutableSet()
+            if (set.contains(folderId)) set.remove(folderId) else set.add(folderId)
+            curr.copy(selectedFolderIds = set, isSelectMode = true)
+        }
+    }
+
+    fun selectAll() {
+        _uiState.update { curr ->
+            curr.copy(
+                isSelectMode = true,
+                selectedFileIds = curr.processedFiles.map { it.id }.toSet(),
+                selectedFolderIds = curr.subfolders.map { it.id }.toSet()
+            )
+        }
+    }
+
+    fun clearSelection() {
+        _uiState.update { curr ->
+            curr.copy(
+                isSelectMode = false,
+                selectedFileIds = emptySet(),
+                selectedFolderIds = emptySet()
+            )
+        }
+    }
+
+    fun setShowVacationSyncSheet(show: Boolean) {
+        _uiState.update { it.copy(showVacationSyncSheet = show) }
+    }
+
+    fun setShowZipProgressDialog(show: Boolean) {
+        _uiState.update { it.copy(showZipProgressDialog = show) }
+    }
+
+    fun downloadFolderZip(folder: DriveFolder) {
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isDownloadingZip = true,
+                    showZipProgressDialog = true,
+                    zipDownloadProgress = ZipDownloader.Progress(0, 1, folder.name, 0),
+                    actionNotice = "Fetching folder tree for '${folder.name}'..."
+                )
+            }
+            repository.getTree(folderId = folder.id, filter = "all").fold(
+                onSuccess = { tree ->
+                    if (tree.items.isEmpty()) {
+                        _uiState.update { it.copy(isDownloadingZip = false, showZipProgressDialog = false, actionNotice = "Folder '${folder.name}' is empty") }
+                        return@launch
+                    }
+                    val context = getApplication<Application>()
+                    val res = ZipDownloader.downloadZip(
+                        context = context,
+                        items = tree.items,
+                        zipName = "${folder.name}.zip",
+                        onProgress = { prog ->
+                            _uiState.update { it.copy(zipDownloadProgress = prog) }
+                        }
+                    )
+                    res.fold(
+                        onSuccess = { msg ->
+                            _uiState.update { it.copy(isDownloadingZip = false, showZipProgressDialog = false, actionNotice = msg) }
+                        },
+                        onFailure = { err ->
+                            _uiState.update { it.copy(isDownloadingZip = false, showZipProgressDialog = false, filesError = "Failed to download ZIP: ${err.message}") }
+                        }
+                    )
+                },
+                onFailure = { err ->
+                    _uiState.update { it.copy(isDownloadingZip = false, showZipProgressDialog = false, filesError = "Failed to fetch folder: ${err.message}") }
+                }
+            )
+        }
+    }
+
+    fun downloadSelectedZip() {
+        val state = _uiState.value
+        val fileIds = state.selectedFileIds
+        val folderIds = state.selectedFolderIds
+        if (fileIds.isEmpty() && folderIds.isEmpty()) return
+
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isDownloadingZip = true,
+                    showZipProgressDialog = true,
+                    zipDownloadProgress = ZipDownloader.Progress(0, fileIds.size + folderIds.size, "Preparing...", 0),
+                    actionNotice = "Preparing selected items for ZIP..."
+                )
+            }
+
+            val itemsToZip = mutableListOf<TreeItem>()
+            val selectedFiles = state.processedFiles.filter { it.id in fileIds }
+            for (f in selectedFiles) {
+                itemsToZip.add(TreeItem(id = f.id, name = f.name, path = f.name, size = f.size, mimeType = f.mimeType))
+            }
+
+            for (folderId in folderIds) {
+                repository.getTree(folderId = folderId, filter = "all").onSuccess { tree ->
+                    itemsToZip.addAll(tree.items)
+                }
+            }
+
+            if (itemsToZip.isEmpty()) {
+                _uiState.update { it.copy(isDownloadingZip = false, showZipProgressDialog = false, actionNotice = "No files found to download") }
+                return@launch
+            }
+
+            val context = getApplication<Application>()
+            val zipName = "selected_export_${System.currentTimeMillis()}.zip"
+            val res = ZipDownloader.downloadZip(
+                context = context,
+                items = itemsToZip,
+                zipName = zipName,
+                onProgress = { prog ->
+                    _uiState.update { it.copy(zipDownloadProgress = prog) }
+                }
+            )
+            res.fold(
+                onSuccess = { msg ->
+                    _uiState.update {
+                        it.copy(
+                            isDownloadingZip = false,
+                            showZipProgressDialog = false,
+                            actionNotice = msg,
+                            selectedFileIds = emptySet(),
+                            selectedFolderIds = emptySet(),
+                            isSelectMode = false
+                        )
+                    }
+                },
+                onFailure = { err ->
+                    _uiState.update { it.copy(isDownloadingZip = false, showZipProgressDialog = false, filesError = "ZIP download failed: ${err.message}") }
+                }
+            )
+        }
+    }
+
+    fun downloadAllNotSyncZip() {
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isDownloadingZip = true,
+                    showZipProgressDialog = true,
+                    zipDownloadProgress = ZipDownloader.Progress(0, 1, "Fetching unsynced tree...", 0),
+                    actionNotice = "Scanning for pending unsynced files..."
+                )
+            }
+            repository.getTree(folderId = null, filter = "not-sync").fold(
+                onSuccess = { tree ->
+                    if (tree.items.isEmpty()) {
+                        _uiState.update { it.copy(isDownloadingZip = false, showZipProgressDialog = false, actionNotice = "No unsynced files pending download") }
+                        return@launch
+                    }
+                    val context = getApplication<Application>()
+                    val zipName = "vacation_photos_${System.currentTimeMillis()}.zip"
+                    val res = ZipDownloader.downloadZip(
+                        context = context,
+                        items = tree.items,
+                        zipName = zipName,
+                        onProgress = { prog ->
+                            _uiState.update { it.copy(zipDownloadProgress = prog) }
+                        }
+                    )
+                    res.fold(
+                        onSuccess = { msg ->
+                            _uiState.update { it.copy(isDownloadingZip = false, showZipProgressDialog = false, actionNotice = msg) }
+                        },
+                        onFailure = { err ->
+                            _uiState.update { it.copy(isDownloadingZip = false, showZipProgressDialog = false, filesError = "Batch ZIP download failed: ${err.message}") }
+                        }
+                    )
+                },
+                onFailure = { err ->
+                    _uiState.update { it.copy(isDownloadingZip = false, showZipProgressDialog = false, filesError = "Failed to scan tree: ${err.message}") }
+                }
+            )
+        }
+    }
+
+    fun downloadManifestJson() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(actionNotice = "Generating JSON manifest...") }
+            repository.getTree(folderId = null, filter = "not-sync").fold(
+                onSuccess = { tree ->
+                    val context = getApplication<Application>()
+                    val jsonLines = tree.items.joinToString(separator = ",\n    ") { item ->
+                        """{"id": "${item.id}", "name": "${item.name.replace("\"", "\\\"")}", "path": "${item.path.replace("\"", "\\\"")}", "size": "${item.size ?: ""}", "mimeType": "${item.mimeType}"}"""
+                    }
+                    val fullJson = """
+                    {
+                      "exportedAt": "${System.currentTimeMillis()}",
+                      "count": ${tree.items.size},
+                      "items": [
+                        $jsonLines
+                      ]
+                    }
+                    """.trimIndent()
+                    val fileName = "dpl-manifest-${System.currentTimeMillis()}.json"
+                    val res = ZipDownloader.saveManifestJson(context, fullJson, fileName)
+                    res.fold(
+                        onSuccess = { msg ->
+                            _uiState.update { it.copy(actionNotice = msg) }
+                        },
+                        onFailure = { err ->
+                            _uiState.update { it.copy(filesError = "Manifest export failed: ${err.message}") }
+                        }
+                    )
+                },
+                onFailure = { err ->
+                    _uiState.update { it.copy(filesError = "Failed to export manifest: ${err.message}") }
+                }
+            )
+        }
+    }
+
+    fun syncSelected() {
+        val state = _uiState.value
+        val fileIds = state.selectedFileIds.toList()
+        val folderIds = state.selectedFolderIds.toList()
+        if (fileIds.isEmpty() && folderIds.isEmpty()) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(actionNotice = "Syncing ${fileIds.size + folderIds.size} selected items...") }
+            var moved = 0
+            for (fId in folderIds) {
+                repository.markFolderSynced(fId).onSuccess { res ->
+                    moved += (res.movedCount ?: 1)
+                }
+            }
+            for (fId in fileIds) {
+                repository.markFileSynced(fId).onSuccess {
+                    moved++
+                }
+            }
+            _uiState.update {
+                it.copy(
+                    selectedFileIds = emptySet(),
+                    selectedFolderIds = emptySet(),
+                    isSelectMode = false,
+                    actionNotice = "Marked selected items as synced"
+                )
+            }
+            loadFiles()
+        }
+    }
+
+    fun markAllNotSyncSynced() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSyncingAll = true, actionNotice = "Marking all pending items as synced...") }
+            val foldersToSync = _uiState.value.subfolders.filter { it.syncStatus == "not-sync" }
+            for (f in foldersToSync) {
+                repository.markFolderSynced(f.id)
+            }
+            val filesToSync = _uiState.value.files.filter { it.syncStatus == "not-sync" }
+            for (f in filesToSync) {
+                repository.markFileSynced(f.id)
+            }
+            _uiState.update { it.copy(isSyncingAll = false, actionNotice = "All pending items marked as synced") }
+            loadFiles()
+        }
     }
 }

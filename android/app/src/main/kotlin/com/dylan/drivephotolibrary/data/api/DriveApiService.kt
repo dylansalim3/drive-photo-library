@@ -7,6 +7,7 @@ import com.dylan.drivephotolibrary.data.model.CreateFolderResponse
 import com.dylan.drivephotolibrary.data.model.FilesResponse
 import com.dylan.drivephotolibrary.data.model.LoginRequest
 import com.dylan.drivephotolibrary.data.model.LoginResponse
+import com.dylan.drivephotolibrary.data.model.TreeResponse
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import retrofit2.http.Body
@@ -34,6 +35,12 @@ interface DriveApiService {
         @Query("search") search: String? = null,
         @Query("folderId") folderId: String? = null
     ): FilesResponse
+
+    @GET("tree")
+    suspend fun getTree(
+        @Query("folderId") folderId: String? = null,
+        @Query("filter") filter: String? = null
+    ): TreeResponse
 
     @POST("folders")
     suspend fun createFolder(@Body request: CreateFolderRequest): CreateFolderResponse

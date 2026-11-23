@@ -1,6 +1,8 @@
 package com.dylan.drivephotolibrary.ui.components
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -11,11 +13,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -23,6 +27,8 @@ import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -37,6 +43,7 @@ import com.dylan.drivephotolibrary.data.network.NetworkModule
 import com.dylan.drivephotolibrary.ui.util.Formatters
 import com.dylan.drivephotolibrary.ui.viewmodel.DateGroupingMode
 import com.dylan.drivephotolibrary.ui.viewmodel.groupFilesByDate
+import kotlinx.coroutines.launch
 
 @Composable
 fun MediaList(
@@ -44,48 +51,101 @@ fun MediaList(
     onSelectFile: (DriveFile, Int) -> Unit,
     onDownloadFile: (DriveFile) -> Unit,
     modifier: Modifier = Modifier,
-    dateGrouping: DateGroupingMode = DateGroupingMode.GROUPED
+    dateGrouping: DateGroupingMode = DateGroupingMode.GROUPED,
+    isSelectMode: Boolean = false,
+    selectedFileIds: Set<String> = emptySet(),
+    onToggleSelectFile: (DriveFile) -> Unit = {}
 ) {
     if (files.isEmpty()) return
 
-    LazyColumn(
-        contentPadding = PaddingValues(vertical = 8.dp),
-        modifier = modifier.fillMaxSize()
-    ) {
-        if (dateGrouping == DateGroupingMode.GROUPED) {
-            val groups = groupFilesByDate(files)
-            groups.forEach { group ->
-                item(key = "header_${group.dateKey}") {
-                    DateGroupHeader(
-                        dateLabel = group.dateLabel,
-                        count = group.files.size,
-                        modifier = Modifier.padding(horizontal = 16.dp)
-                    )
+    val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+    val groups = remember(files) { groupFilesByDate(files) }
+
+    val activeGroupIndex = remember(listState.firstVisibleItemIndex, groups) {
+        if (groups.isEmpty()) 0
+        else {
+            var accum = 0
+            var found = 0
+            for (i in groups.indices) {
+                val groupSize = 1 + groups[i].files.size
+                if (listState.firstVisibleItemIndex >= accum) {
+                    found = i
                 }
-                itemsIndexed(group.files, key = { _, file -> file.id }) { localIdx, file ->
+                accum += groupSize
+            }
+            found
+        }
+    }
+
+    Box(modifier = modifier.fillMaxSize()) {
+        LazyColumn(
+            state = listState,
+            contentPadding = PaddingValues(top = 8.dp, bottom = 80.dp),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            if (dateGrouping == DateGroupingMode.GROUPED) {
+                groups.forEach { group ->
+                    item(key = "header_${group.dateKey}") {
+                        DateGroupHeader(
+                            dateLabel = group.dateLabel,
+                            count = group.files.size,
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        )
+                    }
+                    itemsIndexed(group.files, key = { _, file -> file.id }) { localIdx, file ->
+                        MediaListItem(
+                            file = file,
+                            isSelected = selectedFileIds.contains(file.id),
+                            isSelectMode = isSelectMode,
+                            onClick = { onSelectFile(file, group.startIndex + localIdx) },
+                            onToggleSelect = { onToggleSelectFile(file) },
+                            onDownload = { onDownloadFile(file) }
+                        )
+                    }
+                }
+            } else {
+                itemsIndexed(files, key = { _, file -> file.id }) { index, file ->
                     MediaListItem(
                         file = file,
-                        onClick = { onSelectFile(file, group.startIndex + localIdx) },
+                        isSelected = selectedFileIds.contains(file.id),
+                        isSelectMode = isSelectMode,
+                        onClick = { onSelectFile(file, index) },
+                        onToggleSelect = { onToggleSelectFile(file) },
                         onDownload = { onDownloadFile(file) }
                     )
                 }
             }
-        } else {
-            itemsIndexed(files, key = { _, file -> file.id }) { index, file ->
-                MediaListItem(
-                    file = file,
-                    onClick = { onSelectFile(file, index) },
-                    onDownload = { onDownloadFile(file) }
-                )
-            }
+        }
+
+        // Apple Date Scrubber along right edge
+        if (dateGrouping == DateGroupingMode.GROUPED && groups.size > 1) {
+            AppleDateScrubber(
+                groups = groups,
+                activeGroupIndex = activeGroupIndex,
+                onScrubToGroup = { targetGroupIdx ->
+                    coroutineScope.launch {
+                        var targetItemIndex = 0
+                        for (i in 0 until targetGroupIdx.coerceIn(0, groups.size - 1)) {
+                            targetItemIndex += 1 + groups[i].files.size
+                        }
+                        listState.scrollToItem(targetItemIndex)
+                    }
+                },
+                modifier = Modifier.align(Alignment.CenterEnd)
+            )
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MediaListItem(
     file: DriveFile,
+    isSelected: Boolean,
+    isSelectMode: Boolean,
     onClick: () -> Unit,
+    onToggleSelect: () -> Unit,
     onDownload: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -95,10 +155,30 @@ fun MediaListItem(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .then(
+                if (isSelected) {
+                    Modifier.background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f))
+                } else Modifier
+            )
+            .combinedClickable(
+                onClick = {
+                    if (isSelectMode) onToggleSelect() else onClick()
+                },
+                onLongClick = {
+                    onToggleSelect()
+                }
+            )
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (isSelectMode) {
+            Checkbox(
+                checked = isSelected,
+                onCheckedChange = { onToggleSelect() },
+                modifier = Modifier.padding(end = 8.dp)
+            )
+        }
+
         // Thumbnail Preview with Media Icon
         Box(
             modifier = Modifier
@@ -154,7 +234,7 @@ fun MediaListItem(
 
         // Sync Status Tag
         SuggestionChip(
-            onClick = { /* info */ },
+            onClick = { },
             label = {
                 Text(
                     text = if (isNotSync) "Not-sync" else "Synced",

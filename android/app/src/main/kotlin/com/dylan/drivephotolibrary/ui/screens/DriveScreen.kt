@@ -3,6 +3,11 @@ package com.dylan.drivephotolibrary.ui.screens
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -22,19 +28,27 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SecondaryTabRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -44,6 +58,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.dylan.drivephotolibrary.data.model.DriveFolder
 import com.dylan.drivephotolibrary.ui.components.BreadcrumbsBar
 import com.dylan.drivephotolibrary.ui.components.DriveTopBar
 import com.dylan.drivephotolibrary.ui.components.FolderGridCard
@@ -52,9 +68,11 @@ import com.dylan.drivephotolibrary.ui.components.MediaGrid
 import com.dylan.drivephotolibrary.ui.components.MediaList
 import com.dylan.drivephotolibrary.ui.components.MediaSortFilterBar
 import com.dylan.drivephotolibrary.ui.components.UploadFabSheet
+import com.dylan.drivephotolibrary.ui.components.VacationSyncBottomSheet
 import com.dylan.drivephotolibrary.ui.viewmodel.DriveViewModel
 import com.dylan.drivephotolibrary.ui.viewmodel.ViewMode
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DriveScreen(
     viewModel: DriveViewModel,
@@ -62,6 +80,7 @@ fun DriveScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val vacationSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     // System Media Picker
     val photoPickerLauncher = rememberLauncherForActivityResult(
@@ -100,24 +119,11 @@ fun DriveScreen(
                     viewMode = uiState.viewMode,
                     onViewModeChange = { viewModel.setViewMode(it) },
                     username = uiState.authStatus?.username,
-                    onLogout = { viewModel.logout() }
+                    onLogout = { viewModel.logout() },
+                    onOpenVacationSync = { viewModel.setShowVacationSyncSheet(true) }
                 )
 
-                // Material 3 Filter Tabs (Not-sync, Synced, All)
-                val tabs = listOf("not-sync" to "Not-sync", "synced" to "Synced", "all" to "All")
-                val selectedTabIndex = tabs.indexOfFirst { it.first == uiState.filter }.coerceAtLeast(0)
-
-                SecondaryTabRow(selectedTabIndex = selectedTabIndex) {
-                    tabs.forEachIndexed { index, (key, title) ->
-                        Tab(
-                            selected = selectedTabIndex == index,
-                            onClick = { viewModel.setFilter(key) },
-                            text = { Text(title, fontWeight = FontWeight.SemiBold) }
-                        )
-                    }
-                }
-
-                // Breadcrumbs Bar with Back Navigation & Refresh
+                // Breadcrumbs Bar with Back Navigation & Refresh (Full gallery height maximized)
                 BreadcrumbsBar(
                     breadcrumbs = uiState.breadcrumbs,
                     currentFolderId = uiState.currentFolderId,
@@ -128,17 +134,19 @@ fun DriveScreen(
             }
         },
         floatingActionButton = {
-            UploadFabSheet(
-                onNewFolder = { viewModel.createFolder(it) },
-                onUploadPhotosClick = {
-                    photoPickerLauncher.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
-                    )
-                },
-                onUploadFilesClick = {
-                    filePickerLauncher.launch(arrayOf("image/*", "video/*", "*/*"))
-                }
-            )
+            if (!uiState.isSelectMode) {
+                UploadFabSheet(
+                    onNewFolder = { viewModel.createFolder(it) },
+                    onUploadPhotosClick = {
+                        photoPickerLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                        )
+                    },
+                    onUploadFilesClick = {
+                        filePickerLauncher.launch(arrayOf("image/*", "video/*", "*/*"))
+                    }
+                )
+            }
         }
     ) { innerPadding ->
         Box(
@@ -218,7 +226,11 @@ fun DriveScreen(
                                 FolderGridCard(
                                     folder = folder,
                                     onClick = { viewModel.navigateToFolder(folder.id) },
-                                    onMarkSynced = { viewModel.markFolderSynced(folder.id) }
+                                    onMarkSynced = { viewModel.markFolderSynced(folder.id) },
+                                    onDownloadZip = { viewModel.downloadFolderZip(folder) },
+                                    isSelectMode = uiState.isSelectMode,
+                                    isSelected = uiState.selectedFolderIds.contains(folder.id),
+                                    onToggleSelect = { viewModel.toggleFolderSelection(folder.id) }
                                 )
                             }
                         }
@@ -231,7 +243,11 @@ fun DriveScreen(
                                 FolderListItem(
                                     folder = folder,
                                     onClick = { viewModel.navigateToFolder(folder.id) },
-                                    onMarkSynced = { viewModel.markFolderSynced(folder.id) }
+                                    onMarkSynced = { viewModel.markFolderSynced(folder.id) },
+                                    onDownloadZip = { viewModel.downloadFolderZip(folder) },
+                                    isSelectMode = uiState.isSelectMode,
+                                    isSelected = uiState.selectedFolderIds.contains(folder.id),
+                                    onToggleSelect = { viewModel.toggleFolderSelection(folder.id) }
                                 )
                             }
                         }
@@ -278,12 +294,16 @@ fun DriveScreen(
                 } else {
                     if (uiState.files.isNotEmpty()) {
                         MediaSortFilterBar(
+                            syncFilter = uiState.filter,
+                            onSyncFilterChange = { viewModel.setFilter(it) },
                             mediaTypeFilter = uiState.mediaTypeFilter,
                             onMediaTypeFilterChange = { viewModel.setMediaTypeFilter(it) },
                             sortOption = uiState.sortOption,
                             onSortOptionChange = { viewModel.setSortOption(it) },
                             dateGrouping = uiState.dateGrouping,
                             onDateGroupingChange = { viewModel.setDateGrouping(it) },
+                            isSelectMode = uiState.isSelectMode,
+                            onToggleSelectMode = { viewModel.toggleSelectMode() },
                             totalCount = uiState.files.size,
                             uploaderFilter = uiState.uploaderFilter,
                             onUploaderFilterChange = { viewModel.setUploaderFilter(it) },
@@ -308,16 +328,96 @@ fun DriveScreen(
                                 files = uiState.processedFiles,
                                 onSelectFile = { _, index -> viewModel.selectFile(index) },
                                 dateGrouping = uiState.dateGrouping,
+                                isSelectMode = uiState.isSelectMode,
+                                selectedFileIds = uiState.selectedFileIds,
+                                onToggleSelectFile = { viewModel.toggleFileSelection(it.id) },
                                 modifier = Modifier.weight(1f)
                             )
                         } else {
                             MediaList(
                                 files = uiState.processedFiles,
                                 onSelectFile = { _, index -> viewModel.selectFile(index) },
-                                onDownloadFile = { /* handled in viewer or single item */ },
+                                onDownloadFile = { viewModel.downloadFolderZip(DriveFolder(id = it.id, name = it.name)) },
                                 dateGrouping = uiState.dateGrouping,
+                                isSelectMode = uiState.isSelectMode,
+                                selectedFileIds = uiState.selectedFileIds,
+                                onToggleSelectFile = { viewModel.toggleFileSelection(it.id) },
                                 modifier = Modifier.weight(1f)
                             )
+                        }
+                    }
+                }
+            }
+
+            // Floating Multi-Selection Action Bar
+            val selectedCount = uiState.selectedFileIds.size + uiState.selectedFolderIds.size
+            AnimatedVisibility(
+                visible = uiState.isSelectMode && selectedCount > 0,
+                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = 16.dp, vertical = 16.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    shadowElevation = 10.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "$selectedCount selected",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = { viewModel.downloadSelectedZip() },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Archive,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("ZIP", fontSize = 12.sp)
+                            }
+
+                            FilledTonalButton(
+                                onClick = { viewModel.syncSelected() },
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Sync", fontSize = 12.sp)
+                            }
+
+                            IconButton(
+                                onClick = { viewModel.clearSelection() },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Clear Selection",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
                 }
@@ -332,6 +432,64 @@ fun DriveScreen(
             initialIndex = uiState.selectedFileIndex!!,
             onClose = { viewModel.selectFile(null) },
             onMarkSynced = { viewModel.markFileSynced(it) }
+        )
+    }
+
+    // Vacation Sync Center Modal Bottom Sheet
+    if (uiState.showVacationSyncSheet) {
+        VacationSyncBottomSheet(
+            sheetState = vacationSheetState,
+            onDismissRequest = { viewModel.setShowVacationSyncSheet(false) },
+            pendingCount = uiState.files.count { it.syncStatus == "not-sync" },
+            isDownloadingZip = uiState.isDownloadingZip,
+            zipProgress = uiState.zipDownloadProgress,
+            isSyncingAll = uiState.isSyncingAll,
+            onDownloadAllZip = { viewModel.downloadAllNotSyncZip() },
+            onDownloadManifest = { viewModel.downloadManifestJson() },
+            onMarkAllSynced = { viewModel.markAllNotSyncSynced() }
+        )
+    }
+
+    // Dedicated ZIP Progress Dialog (when downloading in background or outside sheet)
+    if (uiState.isDownloadingZip && uiState.showZipProgressDialog && !uiState.showVacationSyncSheet) {
+        val prog = uiState.zipDownloadProgress
+        AlertDialog(
+            onDismissRequest = { viewModel.setShowZipProgressDialog(false) },
+            title = {
+                Text("Creating ZIP Archive", fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column {
+                    if (prog != null) {
+                        Text(
+                            text = "${prog.percent}% • ${prog.current} of ${prog.total} files",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        LinearProgressIndicator(
+                            progress = { prog.percent / 100f },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = prog.currentFileName,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1
+                        )
+                    } else {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Gathering items from Google Drive...")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.setShowZipProgressDialog(false) }) {
+                    Text("Run in Background")
+                }
+            }
         )
     }
 }
