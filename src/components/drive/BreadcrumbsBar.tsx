@@ -1,4 +1,4 @@
-import { RiArrowLeftLine, RiFolderLine, RiRefreshLine } from "@remixicon/react";
+import { RiArrowLeftLine, RiDownloadLine, RiFolderLine, RiRefreshLine } from "@remixicon/react";
 import { Button } from "@/components/base/buttons/button";
 import type { Breadcrumb } from "@/api";
 
@@ -8,6 +8,8 @@ export interface BreadcrumbsBarProps {
   onNavigate: (folderId?: string) => void;
   onRefresh: () => void;
   loading?: boolean;
+  onDownloadFolder?: () => void;
+  downloadingFolder?: boolean;
 }
 
 export function BreadcrumbsBar({
@@ -16,6 +18,8 @@ export function BreadcrumbsBar({
   onNavigate,
   onRefresh,
   loading,
+  onDownloadFolder,
+  downloadingFolder,
 }: BreadcrumbsBarProps) {
   const isNested = breadcrumbs.length > 1;
   const parentFolder = isNested ? breadcrumbs[breadcrumbs.length - 2] : null;
@@ -77,17 +81,34 @@ export function BreadcrumbsBar({
         </nav>
       </div>
 
-      {/* Refresh Button */}
-      <Button
-        variant="ghost"
-        size="small"
-        iconOnly
-        leadingIcon={RiRefreshLine}
-        aria-label="Refresh library"
-        onClick={onRefresh}
-        disabled={loading}
-        className="shrink-0 min-h-10 min-w-10"
-      />
+      {/* Action Buttons */}
+      <div className="flex items-center gap-1.5 shrink-0">
+        {onDownloadFolder && (
+          <Button
+            variant="ghost"
+            size="small"
+            leadingIcon={RiDownloadLine}
+            aria-label={`Download ${activeName} as ZIP`}
+            title={`Download '${activeName}' as ZIP archive`}
+            onClick={onDownloadFolder}
+            disabled={loading || downloadingFolder}
+            className="text-body-2-medium"
+          >
+            {downloadingFolder ? "Zipping…" : "Download ZIP"}
+          </Button>
+        )}
+
+        <Button
+          variant="ghost"
+          size="small"
+          iconOnly
+          leadingIcon={RiRefreshLine}
+          aria-label="Refresh library"
+          onClick={onRefresh}
+          disabled={loading}
+          className="shrink-0 min-h-10 min-w-10"
+        />
+      </div>
     </div>
   );
 }

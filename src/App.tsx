@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
+  RiCheckLine,
   RiCloseLine,
   RiComputerLine,
+  RiDownloadLine,
   RiFolderAddLine,
   RiFolderLine,
   RiLogoutBoxLine,
@@ -16,7 +18,7 @@ import { Button } from "@/components/base/buttons/button";
 import { Divider } from "@/components/base/divider/divider";
 import { FileUpload } from "@/components/base/file-upload/file-upload";
 import { Input } from "@/components/base/input/input";
-import { Tab, TabList, Tabs } from "@/components/base/tabs/tabs";
+import { AppleDateScrubber } from "./components/drive/AppleDateScrubber";
 import { cx } from "@/utils/cx";
 import { DriveHeader } from "./components/drive/DriveHeader";
 import { BreadcrumbsBar } from "./components/drive/BreadcrumbsBar";
@@ -31,6 +33,7 @@ import { UserManagerSection } from "./components/drive/UserManagerSection";
 import { SharedFolderConfigSection } from "./components/drive/SharedFolderConfigSection";
 import {
   filterAndSortFiles,
+  groupFilesByDate,
   type DateGroupingMode,
   type MediaTypeFilter,
   type SortOption,
@@ -46,6 +49,7 @@ import {
   ApiError,
   createFolder,
   formatBytes,
+  getFileTree,
   getManifest,
   getStatus,
   listFiles,
@@ -60,6 +64,7 @@ import {
   type DriveFolder,
   type Filter,
 } from "./api";
+import { downloadAsZip, type ZipDownloadProgress } from "./utils/zipDownloader";
 
 const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "heic", "heif", "gif", "avif", "bmp", "tiff"] as const;
 const VIDEO_EXTENSIONS = [
@@ -350,10 +355,16 @@ export default function App() {
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [folderError, setFolderError] = useState<string | null>(null);
 
-  // Batch download state
+  // Batch & ZIP download state
   const [batchDownloading, setBatchDownloading] = useState(false);
-  const [batchDownloadProgress, setBatchDownloadProgress] = useState<{ current: number; total: number } | null>(null);
-  const cancelBatchDownload = useRef(false);
+  const [batchDownloadProgress, setBatchDownloadProgress] = useState<ZipDownloadProgress | null>(null);
+  const batchAbortController = useRef<AbortController | null>(null);
+  const [downloadingFolderId, setDownloadingFolderId] = useState<string | null>(null);
+
+  // Multi-item selection state
+  const [isSelectMode, setIsSelectMode] = useState(false);
+  const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set());
+  const [selectedFolderIds, setSelectedFolderIds] = useState<Set<string>>(new Set());
 
   const queueProcessing = useRef(false);
   const folderCache = useRef<Record<string, string>>({});
@@ -388,6 +399,11 @@ export default function App() {
   }, [files]);
 
   const processedFiles = filterAndSortFiles(files, mediaTypeFilter, sortOption, uploaderFilter);
+
+  const dateGroups = useMemo(
+    () => (dateGrouping === "grouped" ? groupFilesByDate(processedFiles) : []),
+    [dateGrouping, processedFiles],
+  );
 
   const handleSelectFile = (file: DriveFile, index: number) => {
     setSelected(file);
@@ -628,28 +644,208 @@ export default function App() {
     }
   };
 
+  const handleToggleSelectFile = (fileId: string) => {
+    setSelectedFileIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(fileId)) {
+        next.delete(fileId);
+      } else {
+        next.add(fileId);
+      }
+      return next;
+    });
+    if (!isSelectMode) setIsSelectMode(true);
+  };
+
+  const handleToggleSelectFolder = (folderId: string) => {
+    setSelectedFolderIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(folderId)) {
+        next.delete(folderId);
+      } else {
+        next.add(folderId);
+      }
+      return next;
+    });
+    if (!isSelectMode) setIsSelectMode(true);
+  };
+
+  const handleClearSelection = () => {
+    setSelectedFileIds(new Set());
+    setSelectedFolderIds(new Set());
+    setIsSelectMode(false);
+  };
+
   const handleBatchDownload = async () => {
-    const notSyncFiles = files.filter((f) => f.syncStatus === "not-sync");
-    if (notSyncFiles.length === 0) return;
     setBatchDownloading(true);
-    cancelBatchDownload.current = false;
-    setBatchDownloadProgress({ current: 0, total: notSyncFiles.length });
+    const controller = new AbortController();
+    batchAbortController.current = controller;
+    setBatchDownloadProgress({
+      current: 0,
+      total: 1,
+      currentFileName: "Scanning pending files and folders…",
+      percent: 0,
+    });
 
-    for (let i = 0; i < notSyncFiles.length; i++) {
-      if (cancelBatchDownload.current) break;
-      const file = notSyncFiles[i];
-      setBatchDownloadProgress({ current: i + 1, total: notSyncFiles.length });
+    try {
+      const tree = await getFileTree({ filter: "not-sync" });
+      if (tree.items.length === 0) {
+        setUploadNotice("No pending files found to download.");
+        return;
+      }
 
-      const anchor = document.createElement("a");
-      anchor.href = `/api/media/file?id=${encodeURIComponent(file.id)}&download=1`;
-      anchor.download = file.name;
-      anchor.click();
+      const today = new Date().toISOString().slice(0, 10);
+      const zipName = `drive-photos-pending-${today}.zip`;
 
-      await new Promise((r) => setTimeout(r, 250));
+      await downloadAsZip({
+        items: tree.items,
+        zipName,
+        signal: controller.signal,
+        onProgress: (p) => setBatchDownloadProgress(p),
+      });
+
+      setUploadNotice(`Downloaded ${tree.items.length} file(s) in ${zipName}!`);
+    } catch (err) {
+      if (controller.signal.aborted) {
+        setUploadNotice("Batch download was cancelled.");
+      } else {
+        setUploadNotice(err instanceof Error ? err.message : "Failed to download batch ZIP.");
+      }
+    } finally {
+      setBatchDownloading(false);
+      setBatchDownloadProgress(null);
+      batchAbortController.current = null;
     }
+  };
 
-    setBatchDownloading(false);
-    setBatchDownloadProgress(null);
+  const handleDownloadFolderZip = async (folder: DriveFolder | { id: string; name: string }) => {
+    setDownloadingFolderId(folder.id);
+    const controller = new AbortController();
+    setUploadNotice(`Scanning folder '${folder.name}'…`);
+
+    try {
+      const tree = await getFileTree({ folderId: folder.id });
+      if (tree.items.length === 0) {
+        setUploadNotice(`Folder '${folder.name}' is empty.`);
+        return;
+      }
+
+      setUploadNotice(`Zipping ${tree.items.length} files from '${folder.name}'…`);
+      await downloadAsZip({
+        items: tree.items,
+        zipName: `${folder.name}.zip`,
+        signal: controller.signal,
+      });
+
+      setUploadNotice(`Downloaded '${folder.name}.zip' successfully!`);
+    } catch (err) {
+      setUploadNotice(err instanceof Error ? err.message : `Failed to download '${folder.name}' ZIP.`);
+    } finally {
+      setDownloadingFolderId(null);
+    }
+  };
+
+  const handleDownloadSelectedAsZip = async () => {
+    const selectedFiles = files.filter((f) => selectedFileIds.has(f.id));
+    const selectedFolders = subfolders.filter((f) => selectedFolderIds.has(f.id));
+    const totalSelected = selectedFiles.length + selectedFolders.length;
+    if (totalSelected === 0) return;
+
+    setBatchDownloading(true);
+    const controller = new AbortController();
+    batchAbortController.current = controller;
+    setBatchDownloadProgress({
+      current: 0,
+      total: 1,
+      currentFileName: "Preparing selected items…",
+      percent: 0,
+    });
+
+    try {
+      const itemsToZip: Array<{ id: string; name: string; path: string }> = [];
+
+      // 1. Add direct files
+      for (const file of selectedFiles) {
+        itemsToZip.push({
+          id: file.id,
+          name: file.name,
+          path: file.name,
+        });
+      }
+
+      // 2. Fetch trees for selected folders
+      for (const folder of selectedFolders) {
+        setBatchDownloadProgress({
+          current: 0,
+          total: 1,
+          currentFileName: `Scanning '${folder.name}'…`,
+          percent: 0,
+        });
+        const tree = await getFileTree({ folderId: folder.id });
+        for (const item of tree.items) {
+          itemsToZip.push({
+            id: item.id,
+            name: item.name,
+            path: `${folder.name}/${item.path}`,
+          });
+        }
+      }
+
+      if (itemsToZip.length === 0) {
+        setUploadNotice("Selected items contain no downloadable media files.");
+        return;
+      }
+
+      const today = new Date().toISOString().slice(0, 10);
+      const zipName =
+        selectedFolders.length === 1 && selectedFiles.length === 0
+          ? `${selectedFolders[0].name}.zip`
+          : `drive-download-${today}.zip`;
+
+      await downloadAsZip({
+        items: itemsToZip,
+        zipName,
+        signal: controller.signal,
+        onProgress: (p) => setBatchDownloadProgress(p),
+      });
+
+      setUploadNotice(`Downloaded ${itemsToZip.length} item(s) in ${zipName}!`);
+      handleClearSelection();
+    } catch (err) {
+      if (controller.signal.aborted) {
+        setUploadNotice("Download was cancelled.");
+      } else {
+        setUploadNotice(err instanceof Error ? err.message : "Failed to download selected items as ZIP.");
+      }
+    } finally {
+      setBatchDownloading(false);
+      setBatchDownloadProgress(null);
+      batchAbortController.current = null;
+    }
+  };
+
+  const handleSyncSelected = async () => {
+    const selectedFiles = files.filter((f) => selectedFileIds.has(f.id));
+    const selectedFolders = subfolders.filter((f) => selectedFolderIds.has(f.id));
+    const total = selectedFiles.length + selectedFolders.length;
+    if (total === 0) return;
+
+    setMarking(true);
+    try {
+      for (const file of selectedFiles) {
+        await markSynced(file.id);
+      }
+      for (const folder of selectedFolders) {
+        await markFolderSynced(folder.id);
+      }
+      setUploadNotice(`Marked ${total} item(s) as synced.`);
+      handleClearSelection();
+      await refreshFiles();
+    } catch (err) {
+      setUploadNotice(err instanceof Error ? err.message : "Failed to sync selected items.");
+    } finally {
+      setMarking(false);
+    }
   };
 
   const handleMarkAllSynced = async () => {
@@ -742,30 +938,24 @@ export default function App() {
         unsyncedCount={files.filter((f) => f.syncStatus === "not-sync").length}
       />
 
-      {/* Filter Tabs & Navigation Bar */}
-      <div className="mt-3 flex flex-col gap-2">
-        <Tabs
-          selectedKey={filter}
-          onSelectionChange={(key) => {
-            setFilter(key as Filter);
-            setCurrentFolderId(undefined);
-          }}
-          aria-label="Library filter"
-        >
-          <TabList aria-label="Library filter">
-            <Tab id="not-sync">Not-sync</Tab>
-            <Tab id="synced">Synced</Tab>
-            <Tab id="all">All</Tab>
-          </TabList>
-        </Tabs>
-
+      {/* Navigation Bar */}
+      <div className="mt-3">
         {/* Drive Breadcrumbs Bar with Back Navigation & Refresh */}
         <BreadcrumbsBar
           breadcrumbs={breadcrumbs}
           currentFolderName={currentFolderName}
-          onNavigate={(targetId) => setCurrentFolderId(targetId)}
+          onNavigate={(targetId) => {
+            handleClearSelection();
+            setCurrentFolderId(targetId);
+          }}
           onRefresh={() => void refreshFiles()}
           loading={loadingFiles}
+          onDownloadFolder={
+            currentFolderId
+              ? () => void handleDownloadFolderZip({ id: currentFolderId, name: currentFolderName })
+              : undefined
+          }
+          downloadingFolder={downloadingFolderId === currentFolderId}
         />
       </div>
 
@@ -881,9 +1071,17 @@ export default function App() {
         <FolderItems
           folders={subfolders}
           viewMode={viewMode}
-          onSelectFolder={(id) => setCurrentFolderId(id)}
+          onSelectFolder={(id) => {
+            handleClearSelection();
+            setCurrentFolderId(id);
+          }}
           onMarkFolderSynced={handleMarkFolderSynced}
           marking={marking}
+          onDownloadFolder={handleDownloadFolderZip}
+          downloadingFolderId={downloadingFolderId}
+          isSelectMode={isSelectMode}
+          selectedFolderIds={selectedFolderIds}
+          onToggleSelectFolder={handleToggleSelectFolder}
         />
 
         {/* Media Files */}
@@ -911,6 +1109,21 @@ export default function App() {
                 uploaderFilter={uploaderFilter}
                 onUploaderFilterChange={setUploaderFilter}
                 uploaders={uploaders}
+                filter={filter}
+                onFilterChange={(newFilter) => {
+                  setFilter(newFilter);
+                  handleClearSelection();
+                  setCurrentFolderId(undefined);
+                }}
+                isSelectMode={isSelectMode}
+                onToggleSelectMode={() => {
+                  if (isSelectMode) {
+                    handleClearSelection();
+                  } else {
+                    setIsSelectMode(true);
+                  }
+                }}
+                selectedCount={selectedFileIds.size + selectedFolderIds.size}
               />
 
               {processedFiles.length === 0 ? (
@@ -922,6 +1135,9 @@ export default function App() {
                   files={processedFiles}
                   onSelectFile={handleSelectFile}
                   dateGrouping={dateGrouping}
+                  isSelectMode={isSelectMode}
+                  selectedFileIds={selectedFileIds}
+                  onToggleSelectFile={handleToggleSelectFile}
                 />
               ) : (
                 <MediaList
@@ -929,12 +1145,56 @@ export default function App() {
                   onSelectFile={handleSelectFile}
                   onDownloadFile={handleSingleDownload}
                   dateGrouping={dateGrouping}
+                  isSelectMode={isSelectMode}
+                  selectedFileIds={selectedFileIds}
+                  onToggleSelectFile={handleToggleSelectFile}
                 />
               )}
             </div>
           )
         )}
       </section>
+
+      {/* Apple Photos Style Date Scrubber (Right-Hand Side Scrollbar) */}
+      <AppleDateScrubber groups={dateGroups} />
+
+      {/* Floating Multi-Item Selection Action Bar (Google Drive style) */}
+      {(selectedFileIds.size > 0 || selectedFolderIds.size > 0) && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 sm:gap-3 px-4 py-2.5 rounded-2xl sm:rounded-full bg-background-primary-default/95 backdrop-blur-xl border border-border-button-default shadow-2xl animate-in slide-in-from-bottom-5 duration-200">
+          <span className="text-body-2-semibold text-text-primary whitespace-nowrap">
+            {selectedFileIds.size + selectedFolderIds.size} selected
+          </span>
+          <div className="h-4 w-px bg-border-secondary" />
+          <Button
+            variant="primary"
+            size="small"
+            leadingIcon={RiDownloadLine}
+            disabled={batchDownloading}
+            onClick={() => void handleDownloadSelectedAsZip()}
+          >
+            {batchDownloading
+              ? `Zipping (${batchDownloadProgress?.percent ?? 0}%)…`
+              : "Download as ZIP"}
+          </Button>
+          <Button
+            variant="secondary"
+            size="small"
+            leadingIcon={RiCheckLine}
+            disabled={marking}
+            onClick={() => void handleSyncSelected()}
+          >
+            Mark Synced
+          </Button>
+          <Button
+            variant="ghost"
+            size="small"
+            iconOnly
+            leadingIcon={RiCloseLine}
+            aria-label="Clear selection"
+            onClick={handleClearSelection}
+          />
+        </div>
+      )}
 
       {/* Mobile Floating Action Button (FAB) & Slide-Up Sheet */}
       <MobileFabSheet
@@ -1088,7 +1348,7 @@ export default function App() {
         batchDownloading={batchDownloading}
         batchProgress={batchDownloadProgress}
         onCancelBatch={() => {
-          cancelBatchDownload.current = true;
+          batchAbortController.current?.abort();
         }}
         onDownloadManifest={handleDownloadManifest}
         manifestBusy={manifestBusy}

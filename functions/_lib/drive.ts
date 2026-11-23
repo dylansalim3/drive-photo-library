@@ -572,3 +572,112 @@ export async function listLibrary(
     archiveId: archive?.id ?? null,
   };
 }
+
+export interface TreeFileItem {
+  id: string;
+  name: string;
+  path: string;
+  size?: string;
+  mimeType: string;
+}
+
+export async function getFolderTree(
+  env: Env,
+  folderId: string,
+  basePath = "",
+  maxDepth = 8,
+): Promise<TreeFileItem[]> {
+  if (maxDepth <= 0) return [];
+  const results: TreeFileItem[] = [];
+
+  const response = await driveFetch(
+    env,
+    `/drive/v3/files?q=${encodeURIComponent(
+      `'${escapeDriveQuery(folderId)}' in parents and trashed = false`,
+    )}&fields=${encodeURIComponent("files(id,name,mimeType,size,properties)")}&pageSize=100`,
+  );
+  if (!response || !response.ok) return results;
+  const body = (await response.json()) as {
+    files?: { id: string; name: string; mimeType: string; size?: string }[];
+  };
+  const items = body.files ?? [];
+
+  const subfolders: { id: string; name: string }[] = [];
+
+  for (const item of items) {
+    if (item.mimeType === "application/vnd.google-apps.folder") {
+      subfolders.push({ id: item.id, name: item.name });
+    } else if (item.mimeType.startsWith("image/") || item.mimeType.startsWith("video/")) {
+      const filePath = basePath ? `${basePath}/${item.name}` : item.name;
+      results.push({
+        id: item.id,
+        name: item.name,
+        path: filePath,
+        size: item.size,
+        mimeType: item.mimeType,
+      });
+    }
+  }
+
+  if (subfolders.length > 0) {
+    const subPromises = subfolders.map((sf) => {
+      const subPath = basePath ? `${basePath}/${sf.name}` : sf.name;
+      return getFolderTree(env, sf.id, subPath, maxDepth - 1);
+    });
+    const subResults = await Promise.all(subPromises);
+    for (const subList of subResults) {
+      results.push(...subList);
+    }
+  }
+
+  return results;
+}
+
+export async function getNotSyncTree(env: Env): Promise<TreeFileItem[]> {
+  const rootId = await getRootFolderId(env);
+  const inbox = await findFolder(env, INBOX_FOLDER, rootId);
+
+  const treeItems: TreeFileItem[] = [];
+  if (inbox) {
+    const inboxTree = await getFolderTree(env, inbox.id, "");
+    treeItems.push(...inboxTree);
+  }
+
+  const notSyncFiles = await listNotSyncFiles(env);
+  const seenIds = new Set(treeItems.map((item) => item.id));
+
+  if (notSyncFiles) {
+    const missing = notSyncFiles.filter((f) => !seenIds.has(f.id));
+    if (missing.length > 0) {
+      const folderNameCache = new Map<string, string>();
+      for (const f of missing) {
+        const parentId = f.parents?.[0];
+        let folderPath = "";
+        if (parentId && parentId !== rootId && parentId !== inbox?.id) {
+          if (!folderNameCache.has(parentId)) {
+            const folderRes = await driveFetch(
+              env,
+              `/drive/v3/files/${encodeURIComponent(parentId)}?fields=name`,
+            );
+            if (folderRes && folderRes.ok) {
+              const fb = (await folderRes.json()) as { name?: string };
+              folderNameCache.set(parentId, fb.name ?? "Folder");
+            } else {
+              folderNameCache.set(parentId, "");
+            }
+          }
+          folderPath = folderNameCache.get(parentId) || "";
+        }
+        treeItems.push({
+          id: f.id,
+          name: f.name,
+          path: folderPath ? `${folderPath}/${f.name}` : f.name,
+          size: f.size,
+          mimeType: f.mimeType,
+        });
+      }
+    }
+  }
+
+  return treeItems;
+}

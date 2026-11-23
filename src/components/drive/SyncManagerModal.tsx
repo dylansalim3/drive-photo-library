@@ -16,7 +16,7 @@ export interface SyncManagerModalProps {
   files: DriveFile[];
   onBatchDownload: () => Promise<void>;
   batchDownloading: boolean;
-  batchProgress: { current: number; total: number } | null;
+  batchProgress: { current: number; total: number; currentFileName?: string; percent?: number } | null;
   onCancelBatch: () => void;
   onDownloadManifest: () => Promise<void>;
   manifestBusy: boolean;
@@ -86,40 +86,63 @@ export function SyncManagerModal({
 
           {/* Sync Operations */}
           <div className="flex flex-col gap-3.5">
-            {/* 1. Batch Direct Download */}
+            {/* 1. Batch ZIP Download */}
             <div className="flex flex-col gap-2 rounded-2xl border border-border-button-default bg-background-primary-default p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-body-medium font-semibold text-text-primary">
-                    Direct Browser Batch Download
+                    Batch ZIP Download (with Folder Hierarchy)
                   </p>
                   <p className="text-caption-1-regular text-text-secondary mt-0.5">
-                    Streams and downloads all {notSyncCount} pending photos and videos directly to your browser download folder.
+                    Packages and downloads all {notSyncCount} pending photos, videos, and folders into a single organized .zip file, matching Google Drive's folder download.
                   </p>
                 </div>
               </div>
 
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <Button
-                  variant="primary"
-                  size="small"
-                  leadingIcon={RiDownloadLine}
-                  disabled={batchDownloading || notSyncCount === 0}
-                  onClick={() => void onBatchDownload()}
-                >
-                  {batchDownloading && batchProgress
-                    ? `Downloading ${batchProgress.current}/${batchProgress.total}…`
-                    : `Start batch download (${notSyncCount} files)`}
-                </Button>
-                {batchDownloading && (
+              <div className="mt-2 flex flex-col gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <Button
-                    variant="ghost"
+                    variant="primary"
                     size="small"
-                    leadingIcon={RiStopCircleLine}
-                    onClick={onCancelBatch}
+                    leadingIcon={RiDownloadLine}
+                    disabled={batchDownloading || notSyncCount === 0}
+                    onClick={() => void onBatchDownload()}
                   >
-                    Cancel
+                    {batchDownloading && batchProgress
+                      ? `Zipping ${batchProgress.current}/${batchProgress.total} (${batchProgress.percent ?? Math.round((batchProgress.current / batchProgress.total) * 100)}%)…`
+                      : `Download as ZIP (${notSyncCount} files)`}
                   </Button>
+                  {batchDownloading && (
+                    <Button
+                      variant="ghost"
+                      size="small"
+                      leadingIcon={RiStopCircleLine}
+                      onClick={onCancelBatch}
+                    >
+                      Cancel
+                    </Button>
+                  )}
+                </div>
+
+                {batchDownloading && batchProgress && (
+                  <div className="flex flex-col gap-1.5 rounded-xl border border-border-button-default bg-background-secondary-default p-2.5 mt-1">
+                    <div className="flex items-center justify-between text-caption-1-regular text-text-secondary">
+                      <span className="truncate max-w-[240px] font-mono text-[11px] text-text-primary">
+                        {batchProgress.currentFileName || "Preparing files…"}
+                      </span>
+                      <span className="font-semibold text-accent-500">
+                        {batchProgress.percent ?? Math.round((batchProgress.current / batchProgress.total) * 100)}%
+                      </span>
+                    </div>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-background-primary-default border border-border-button-default">
+                      <div
+                        className="h-full bg-accent-500 transition-all duration-200 rounded-full"
+                        style={{
+                          width: `${batchProgress.percent ?? Math.round((batchProgress.current / batchProgress.total) * 100)}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
                 )}
               </div>
             </div>

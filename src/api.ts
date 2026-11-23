@@ -292,3 +292,30 @@ export async function resetRootFolder(): Promise<{
     body: JSON.stringify({ resetDefault: true }),
   });
 }
+
+export interface TreeFileItem {
+  id: string;
+  name: string;
+  path: string;
+  size?: string;
+  mimeType: string;
+}
+
+export interface TreeResponse {
+  ok: boolean;
+  folderId?: string;
+  folderName: string;
+  count: number;
+  items: TreeFileItem[];
+}
+
+export async function getFileTree(options?: {
+  folderId?: string;
+  filter?: "not-sync" | "all" | "synced";
+}): Promise<TreeResponse> {
+  const params = new URLSearchParams();
+  if (options?.folderId) params.set("folderId", options.folderId);
+  if (options?.filter) params.set("filter", options.filter);
+  const qs = params.toString();
+  return request<TreeResponse>(`/api/tree${qs ? `?${qs}` : ""}`);
+}

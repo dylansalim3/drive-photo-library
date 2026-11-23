@@ -4,12 +4,15 @@ import {
   RiArrowDownSLine,
   RiCalendarLine,
   RiCheckLine,
+  RiCheckboxMultipleLine,
+  RiFilter3Line,
   RiGridLine,
   RiImageLine,
   RiUserLine,
   RiVideoLine,
 } from "@remixicon/react";
 import { cx } from "@/utils/cx";
+import type { Filter } from "@/api";
 import type { DateGroupingMode, MediaTypeFilter, SortOption } from "@/utils/dateGrouping";
 
 export interface MediaSortFilterBarProps {
@@ -23,6 +26,11 @@ export interface MediaSortFilterBarProps {
   uploaderFilter?: string;
   onUploaderFilterChange?: (uploader: string) => void;
   uploaders?: string[];
+  filter?: Filter;
+  onFilterChange?: (filter: Filter) => void;
+  isSelectMode?: boolean;
+  onToggleSelectMode?: () => void;
+  selectedCount?: number;
 }
 
 const SORT_LABELS: Record<SortOption, string> = {
@@ -45,11 +53,18 @@ export function MediaSortFilterBar({
   uploaderFilter = "all",
   onUploaderFilterChange,
   uploaders = [],
+  filter = "all",
+  onFilterChange,
+  isSelectMode,
+  onToggleSelectMode,
+  selectedCount = 0,
 }: MediaSortFilterBarProps) {
   const [showSortDropdown, setShowSortDropdown] = useState(false);
   const [showUploaderDropdown, setShowUploaderDropdown] = useState(false);
+  const [showSyncDropdown, setShowSyncDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const uploaderDropdownRef = useRef<HTMLDivElement>(null);
+  const syncDropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleOutsideClick = (e: MouseEvent) => {
@@ -58,6 +73,9 @@ export function MediaSortFilterBar({
       }
       if (uploaderDropdownRef.current && !uploaderDropdownRef.current.contains(e.target as Node)) {
         setShowUploaderDropdown(false);
+      }
+      if (syncDropdownRef.current && !syncDropdownRef.current.contains(e.target as Node)) {
+        setShowSyncDropdown(false);
       }
     };
     document.addEventListener("mousedown", handleOutsideClick);
@@ -247,6 +265,108 @@ export function MediaSortFilterBar({
             </div>
           )}
         </div>
+
+        {/* Sync Status Filter Dropdown (All / Not-sync / Synced) */}
+        {onFilterChange && (
+          <div className="relative" ref={syncDropdownRef}>
+            <button
+              type="button"
+              onClick={() => setShowSyncDropdown((v) => !v)}
+              aria-label="Filter sync status"
+              className={cx(
+                "flex items-center gap-1.5 rounded-xl border border-border-button-default bg-background-primary-default px-2.5 py-1.5 text-text-primary hover:bg-background-secondary-default transition-colors outline-none shadow-2xs",
+                filter !== "all" && "border-accent-500/50 bg-accent-500/10 text-accent-500 font-semibold",
+              )}
+            >
+              <RiFilter3Line className="size-3.5 text-accent-500" />
+              <span className="truncate">
+                {filter === "all" ? "Sync: All" : filter === "not-sync" ? "Not-sync" : "Synced"}
+              </span>
+              <RiArrowDownSLine className="size-3 text-text-tertiary" />
+            </button>
+
+            {showSyncDropdown && (
+              <div className="absolute right-0 top-full z-40 mt-1.5 w-40 rounded-2xl border border-border-button-default bg-background-primary-default p-1.5 shadow-xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-150">
+                <p className="px-2.5 py-1 text-caption-2-medium text-text-tertiary uppercase tracking-wider">
+                  Sync Status
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onFilterChange("all");
+                    setShowSyncDropdown(false);
+                  }}
+                  className={cx(
+                    "flex w-full items-center justify-between rounded-xl px-2.5 py-1.5 text-start transition-colors outline-none",
+                    filter === "all"
+                      ? "bg-background-secondary-default text-accent-500 font-semibold"
+                      : "text-text-primary hover:bg-background-secondary-default",
+                  )}
+                >
+                  <span>All items</span>
+                  {filter === "all" && <RiCheckLine className="size-4 text-accent-500" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onFilterChange("not-sync");
+                    setShowSyncDropdown(false);
+                  }}
+                  className={cx(
+                    "flex w-full items-center justify-between rounded-xl px-2.5 py-1.5 text-start transition-colors outline-none",
+                    filter === "not-sync"
+                      ? "bg-background-secondary-default text-accent-500 font-semibold"
+                      : "text-text-primary hover:bg-background-secondary-default",
+                  )}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span className="size-2 rounded-full bg-amber-400" />
+                    <span>Not-sync</span>
+                  </div>
+                  {filter === "not-sync" && <RiCheckLine className="size-4 text-accent-500" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onFilterChange("synced");
+                    setShowSyncDropdown(false);
+                  }}
+                  className={cx(
+                    "flex w-full items-center justify-between rounded-xl px-2.5 py-1.5 text-start transition-colors outline-none",
+                    filter === "synced"
+                      ? "bg-background-secondary-default text-accent-500 font-semibold"
+                      : "text-text-primary hover:bg-background-secondary-default",
+                  )}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span className="size-2 rounded-full bg-emerald-400" />
+                    <span>Synced</span>
+                  </div>
+                  {filter === "synced" && <RiCheckLine className="size-4 text-accent-500" />}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Multi-Item Select Toggle Button */}
+        {onToggleSelectMode && (
+          <button
+            type="button"
+            onClick={onToggleSelectMode}
+            title={isSelectMode ? "Exit selection mode" : "Select multiple items to download as ZIP or sync"}
+            aria-label="Select items"
+            className={cx(
+              "flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 transition-colors outline-none shadow-2xs",
+              isSelectMode
+                ? "border-accent-500 bg-accent-500/10 text-accent-500 font-semibold"
+                : "border-border-button-default bg-background-primary-default text-text-secondary hover:text-text-primary hover:bg-background-secondary-default",
+            )}
+          >
+            <RiCheckboxMultipleLine className="size-3.5" />
+            <span>{isSelectMode ? (selectedCount > 0 ? `${selectedCount} selected` : "Done") : "Select"}</span>
+          </button>
+        )}
       </div>
     </div>
   );
