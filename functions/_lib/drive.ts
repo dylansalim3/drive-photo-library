@@ -740,6 +740,53 @@ export async function createResumableUploadSession(
   return { uploadUrl };
 }
 
+export async function findExistingDriveFile(
+  env: Env,
+  params: { md5?: string; fileName?: string; size?: number; folderId?: string }
+): Promise<{ id: string; name: string; matchType: "md5" | "name_size" } | null> {
+  const rootId = await getRootFolderId(env);
+  const targetFolderId = params.folderId || (await findOrCreateFolder(env, INBOX_FOLDER, rootId, null));
+
+  // 1. If MD5 provided, query globally within library
+  if (params.md5) {
+    const cleanMd5 = params.md5.toLowerCase().replace(/[^a-f0-9]/g, "");
+    if (cleanMd5.length === 32) {
+      const md5Query = `trashed = false and md5Checksum = '${cleanMd5}'`;
+      const res = await driveFetch(
+        env,
+        `/drive/v3/files?q=${encodeURIComponent(md5Query)}&fields=${encodeURIComponent("files(id, name, md5Checksum, size)")}&pageSize=1`
+      );
+      if (res && res.ok) {
+        const data = (await res.json()) as { files?: Array<{ id: string; name: string }> };
+        if (data.files && data.files.length > 0) {
+          return { id: data.files[0].id, name: data.files[0].name, matchType: "md5" };
+        }
+      }
+    }
+  }
+
+  // 2. Fallback check: exact name and size in target folder or staging inbox
+  if (params.fileName && params.size && params.size > 0 && targetFolderId) {
+    const escapedName = params.fileName.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    const nameQuery = `trashed = false and '${targetFolderId}' in parents and name = '${escapedName}'`;
+    const res = await driveFetch(
+      env,
+      `/drive/v3/files?q=${encodeURIComponent(nameQuery)}&fields=${encodeURIComponent("files(id, name, size)")}&pageSize=1`
+    );
+    if (res && res.ok) {
+      const data = (await res.json()) as { files?: Array<{ id: string; name: string; size?: string }> };
+      if (data.files && data.files.length > 0) {
+        const f = data.files[0];
+        if (!f.size || parseInt(f.size, 10) === params.size) {
+          return { id: f.id, name: f.name, matchType: "name_size" };
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
 export async function moveItemToTrash(
   env: Env,
   itemId: string,
