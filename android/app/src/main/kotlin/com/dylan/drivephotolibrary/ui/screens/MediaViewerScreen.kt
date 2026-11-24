@@ -7,8 +7,12 @@ import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Environment
+import android.provider.Settings
+import android.view.GestureDetector
+import android.view.MotionEvent
 import android.view.ViewGroup
 import android.view.Window
 import android.widget.FrameLayout
@@ -17,6 +21,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
@@ -45,23 +51,32 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.BrightnessMedium
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.FastForward
+import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.VolumeMute
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
@@ -82,10 +97,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -108,6 +125,9 @@ import com.dylan.drivephotolibrary.ui.components.PillSize
 import com.dylan.drivephotolibrary.ui.components.UploaderAvatarPill
 import com.dylan.drivephotolibrary.ui.util.DevicePosture
 import com.dylan.drivephotolibrary.ui.util.ExifFormatter
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 import com.dylan.drivephotolibrary.ui.util.Formatters
 import com.dylan.drivephotolibrary.ui.util.rememberDevicePosture
 import kotlinx.coroutines.delay
@@ -164,6 +184,8 @@ fun MediaViewerDialog(
     var areControlsVisible by remember { mutableStateOf(true) }
     var isVideoPlaying by remember { mutableStateOf(false) }
     var userInteractionTrigger by remember { mutableLongStateOf(0L) }
+    var playbackSpeed by remember { mutableFloatStateOf(1.0f) }
+    var showSpeedMenu by remember { mutableStateOf(false) }
 
     fun toggleOrientation() {
         val act = activity ?: return
@@ -194,6 +216,8 @@ fun MediaViewerDialog(
 
     // When swiping to a photo, immediately restore system bars and controls
     LaunchedEffect(pagerState.currentPage) {
+        playbackSpeed = 1.0f
+        showSpeedMenu = false
         val file = files.getOrNull(pagerState.currentPage)
         if (file?.isVideo != true) {
             areControlsVisible = true
@@ -248,6 +272,7 @@ fun MediaViewerDialog(
                                 VideoPlayerItem(
                                     file = file,
                                     areControlsVisible = true,
+                                    playbackSpeed = playbackSpeed,
                                     onToggleControls = {},
                                     onIsPlayingChanged = {}
                                 )
@@ -469,6 +494,7 @@ fun MediaViewerDialog(
                             VideoPlayerItem(
                                 file = file,
                                 areControlsVisible = areControlsVisible,
+                                playbackSpeed = playbackSpeed,
                                 onToggleControls = {
                                     areControlsVisible = !areControlsVisible
                                     userInteractionTrigger = System.currentTimeMillis()
@@ -556,6 +582,62 @@ fun MediaViewerDialog(
                                         color = Color(0xCCFFFFFF),
                                         style = MaterialTheme.typography.bodySmall
                                     )
+                                }
+                            }
+
+                            // Playback speed selector for video
+                            if (isCurrentVideo) {
+                                Box {
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = Color(0x33FFFFFF),
+                                        modifier = Modifier
+                                            .clickable { showSpeedMenu = true }
+                                            .padding(horizontal = 4.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Speed,
+                                                contentDescription = "Playback Speed",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Text(
+                                                text = if (playbackSpeed == 1.0f) "1x" else "${playbackSpeed}x",
+                                                color = Color.White,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+
+                                    DropdownMenu(
+                                        expanded = showSpeedMenu,
+                                        onDismissRequest = { showSpeedMenu = false }
+                                    ) {
+                                        val speeds = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
+                                        speeds.forEach { spd ->
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        text = if (spd == 1.0f) "1.0x (Normal)" else "${spd}x",
+                                                        fontWeight = if (playbackSpeed == spd) FontWeight.Bold else FontWeight.Normal
+                                                    )
+                                                },
+                                                onClick = {
+                                                    playbackSpeed = spd
+                                                    showSpeedMenu = false
+                                                },
+                                                leadingIcon = if (playbackSpeed == spd) {
+                                                    { Icon(Icons.Default.Check, contentDescription = null) }
+                                                } else null
+                                            )
+                                        }
+                                    }
                                 }
                             }
 
@@ -768,14 +850,26 @@ private fun PhotoViewerItem(
     }
 }
 
+private enum class GestureFeedbackType {
+    BRIGHTNESS,
+    VOLUME
+}
+
 @Composable
 private fun VideoPlayerItem(
     file: DriveFile,
     areControlsVisible: Boolean,
+    playbackSpeed: Float,
     onToggleControls: () -> Unit,
     onIsPlayingChanged: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
+    val activity = remember(context) { context.findActivity() }
+    val audioManager = remember(context) {
+        context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+    }
+
     val videoUrl = "${NetworkModule.BASE_URL}media/file?id=${file.id}"
 
     val exoPlayer = remember(file.id) {
@@ -784,6 +878,10 @@ private fun VideoPlayerItem(
             prepare()
             playWhenReady = false
         }
+    }
+
+    LaunchedEffect(playbackSpeed) {
+        exoPlayer.setPlaybackSpeed(playbackSpeed)
     }
 
     DisposableEffect(file.id) {
@@ -810,8 +908,70 @@ private fun VideoPlayerItem(
         }
     }
 
+    // Double-tap seek visual states
+    var showRewindBadge by remember { mutableStateOf(false) }
+    var showForwardBadge by remember { mutableStateOf(false) }
+
+    LaunchedEffect(showRewindBadge) {
+        if (showRewindBadge) {
+            delay(650)
+            showRewindBadge = false
+        }
+    }
+
+    LaunchedEffect(showForwardBadge) {
+        if (showForwardBadge) {
+            delay(650)
+            showForwardBadge = false
+        }
+    }
+
+    // Gesture feedback states (brightness / volume)
+    var gestureFeedbackType by remember { mutableStateOf<GestureFeedbackType?>(null) }
+    var feedbackPercent by remember { mutableFloatStateOf(0.5f) }
+    var hideFeedbackTrigger by remember { mutableLongStateOf(0L) }
+
+    LaunchedEffect(hideFeedbackTrigger) {
+        if (hideFeedbackTrigger > 0L) {
+            delay(1200)
+            gestureFeedbackType = null
+        }
+    }
+
+    fun adjustBrightness(delta: Float) {
+        val act = activity ?: return
+        val lp = act.window.attributes
+        val current = if (lp.screenBrightness in 0.0f..1.0f) {
+            lp.screenBrightness
+        } else {
+            try {
+                Settings.System.getInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS) / 255.0f
+            } catch (_: Exception) {
+                0.5f
+            }
+        }
+        val target = (current + delta).coerceIn(0.01f, 1.0f)
+        lp.screenBrightness = target
+        act.window.attributes = lp
+        feedbackPercent = target
+        gestureFeedbackType = GestureFeedbackType.BRIGHTNESS
+    }
+
+    fun adjustVolume(delta: Float) {
+        val am = audioManager ?: return
+        val maxVolume = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        val currentVolume = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+        val currentFraction = currentVolume.toFloat() / maxVolume.coerceAtLeast(1)
+        val targetFraction = (currentFraction + delta).coerceIn(0.0f, 1.0f)
+        val targetVolume = (targetFraction * maxVolume).roundToInt().coerceIn(0, maxVolume)
+        am.setStreamVolume(AudioManager.STREAM_MUSIC, targetVolume, 0)
+        feedbackPercent = targetFraction
+        gestureFeedbackType = GestureFeedbackType.VOLUME
+    }
+
     Box(
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
     ) {
         AndroidView(
             factory = { ctx ->
@@ -828,11 +988,207 @@ private fun VideoPlayerItem(
                             onToggleControls()
                         }
                     })
+
+                    val detector = GestureDetector(ctx, object : GestureDetector.SimpleOnGestureListener() {
+                        override fun onDoubleTap(e: MotionEvent): Boolean {
+                            val w = width.coerceAtLeast(1)
+                            if (e.x < w / 2) {
+                                // Double tap left: Rewind 10s
+                                val pos = exoPlayer.currentPosition
+                                exoPlayer.seekTo(maxOf(0L, pos - 10_000L))
+                                showRewindBadge = true
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            } else {
+                                // Double tap right: Forward 10s
+                                val pos = exoPlayer.currentPosition
+                                val dur = exoPlayer.duration
+                                exoPlayer.seekTo(minOf(dur, pos + 10_000L))
+                                showForwardBadge = true
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            }
+                            return true
+                        }
+
+                        override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                            onToggleControls()
+                            return true
+                        }
+
+                        override fun onScroll(
+                            e1: MotionEvent?,
+                            e2: MotionEvent,
+                            distanceX: Float,
+                            distanceY: Float
+                        ): Boolean {
+                            if (e1 == null) return false
+                            val h = height.coerceAtLeast(1)
+                            val w = width.coerceAtLeast(1)
+                            // Avoid capturing touches near the bottom seekbar (bottom 70dp)
+                            val density = ctx.resources.displayMetrics.density
+                            if (e1.y > h - (70 * density)) return false
+
+                            val isLeft = e1.x < w / 2
+                            val delta = distanceY / (h * 0.75f)
+
+                            if (isLeft) {
+                                adjustBrightness(delta)
+                            } else {
+                                adjustVolume(delta)
+                            }
+                            return true
+                        }
+                    })
+
+                    setOnTouchListener { _, event ->
+                        val handled = detector.onTouchEvent(event)
+                        if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
+                            hideFeedbackTrigger = System.currentTimeMillis()
+                        }
+                        handled
+                    }
+
                     playerViewRef = this
                 }
             },
             modifier = Modifier.fillMaxSize()
         )
+
+        // Rewind Badge (Left Half)
+        AnimatedVisibility(
+            visible = showRewindBadge,
+            enter = fadeIn(tween(150)) + scaleIn(tween(150), initialScale = 0.8f),
+            exit = fadeOut(tween(200)),
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .padding(start = 48.dp)
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = Color(0x99000000),
+                modifier = Modifier.size(80.dp)
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FastRewind,
+                        contentDescription = "Rewind 10 seconds",
+                        tint = Color.White,
+                        modifier = Modifier.size(32.dp)
+                    )
+                    Text(
+                        text = "10s",
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        // Fast Forward Badge (Right Half)
+        AnimatedVisibility(
+            visible = showForwardBadge,
+            enter = fadeIn(tween(150)) + scaleIn(tween(150), initialScale = 0.8f),
+            exit = fadeOut(tween(200)),
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = 48.dp)
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = Color(0x99000000),
+                modifier = Modifier.size(80.dp)
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FastForward,
+                        contentDescription = "Forward 10 seconds",
+                        tint = Color.White,
+                        modifier = Modifier.size(32.dp)
+                    )
+                    Text(
+                        text = "10s",
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        // Floating Volume / Brightness Level Pill (Center)
+        AnimatedVisibility(
+            visible = gestureFeedbackType != null,
+            enter = fadeIn(tween(150)) + scaleIn(tween(150), initialScale = 0.9f),
+            exit = fadeOut(tween(250)),
+            modifier = Modifier.align(Alignment.Center)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = Color(0xCC1F2937),
+                shadowElevation = 8.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    val icon = when (gestureFeedbackType) {
+                        GestureFeedbackType.BRIGHTNESS -> Icons.Default.BrightnessMedium
+                        GestureFeedbackType.VOLUME -> if (feedbackPercent == 0f) Icons.Default.VolumeMute else Icons.Default.VolumeUp
+                        null -> Icons.Default.BrightnessMedium
+                    }
+                    val label = when (gestureFeedbackType) {
+                        GestureFeedbackType.BRIGHTNESS -> "Brightness"
+                        GestureFeedbackType.VOLUME -> "Volume"
+                        null -> ""
+                    }
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = label,
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Column(
+                        modifier = Modifier.width(120.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = label,
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Text(
+                                text = "${(feedbackPercent * 100).toInt()}%",
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        LinearProgressIndicator(
+                            progress = { feedbackPercent },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(2.dp)),
+                            color = MaterialTheme.colorScheme.primary,
+                            trackColor = Color(0x44FFFFFF)
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
