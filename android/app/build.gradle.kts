@@ -102,4 +102,7 @@ dependencies {
 
   // WorkManager (Background Uploads)
   implementation(libs.androidx.work.runtime.ktx)
+
+  // Biometric Authentication & Security
+  implementation(libs.androidx.biometric)
 }

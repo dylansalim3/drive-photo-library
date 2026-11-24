@@ -11,6 +11,8 @@ import androidx.work.WorkManager
 import com.dylan.drivephotolibrary.data.backup.AutoBackupScheduler
 import com.dylan.drivephotolibrary.data.backup.SyncLedgerDatabase
 import com.dylan.drivephotolibrary.data.settings.AutoBackupPreferences
+import com.dylan.drivephotolibrary.data.settings.SecurityPreferences
+import com.dylan.drivephotolibrary.ui.security.BiometricAuthManager
 import com.dylan.drivephotolibrary.data.model.AppUser
 import com.dylan.drivephotolibrary.data.model.AuthStatus
 import com.dylan.drivephotolibrary.data.model.Breadcrumb
@@ -155,7 +157,12 @@ data class DriveUiState(
     val autoBackupLastTime: Long = 0L,
     val autoBackupLastResult: String = "",
     val autoBackupSyncedCount: Int = 0,
-    val isAutoBackingUp: Boolean = false
+    val isAutoBackingUp: Boolean = false,
+    // Phase 8: Biometric Security & App Lock
+    val biometricEnabled: Boolean = false,
+    val lockTimeoutMinutes: Int = 0,
+    val hideInRecentApps: Boolean = false,
+    val canUseBiometrics: Boolean = false
 ) {
     val uploaders: List<String>
         get() = files.mapNotNull { it.uploadedBy }.distinct()
@@ -218,8 +225,10 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
     private val themePreferences = ThemePreferences(application)
     private val autoBackupPreferences = AutoBackupPreferences.getInstance(application)
     private val syncLedger = SyncLedgerDatabase.getInstance(application)
+    private val securityPreferences = SecurityPreferences.getInstance(application)
 
     init {
+        _uiState.update { it.copy(canUseBiometrics = BiometricAuthManager.canAuthenticate(application)) }
         viewModelScope.launch {
             themePreferences.themeMode.collect { mode ->
                 _uiState.update { it.copy(themeMode = mode) }
@@ -256,6 +265,21 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         viewModelScope.launch {
+            securityPreferences.biometricEnabled.collect { en ->
+                _uiState.update { it.copy(biometricEnabled = en) }
+            }
+        }
+        viewModelScope.launch {
+            securityPreferences.lockTimeoutMinutes.collect { min ->
+                _uiState.update { it.copy(lockTimeoutMinutes = min) }
+            }
+        }
+        viewModelScope.launch {
+            securityPreferences.hideInRecentApps.collect { hide ->
+                _uiState.update { it.copy(hideInRecentApps = hide) }
+            }
+        }
+        viewModelScope.launch {
             WorkManager.getInstance(application)
                 .getWorkInfosForUniqueWorkFlow(AutoBackupScheduler.UNIQUE_IMMEDIATE_WORK_NAME)
                 .collect { workInfos ->
@@ -267,6 +291,18 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
         refreshAutoBackupLedgerCount()
         checkAuth()
         checkForAppUpdates(silent = true)
+    }
+
+    fun setBiometricEnabled(enabled: Boolean) {
+        securityPreferences.setBiometricEnabled(enabled)
+    }
+
+    fun setLockTimeoutMinutes(minutes: Int) {
+        securityPreferences.setLockTimeoutMinutes(minutes)
+    }
+
+    fun setHideInRecentApps(hide: Boolean) {
+        securityPreferences.setHideInRecentApps(hide)
     }
 
     fun setAutoBackupEnabled(enabled: Boolean) {
