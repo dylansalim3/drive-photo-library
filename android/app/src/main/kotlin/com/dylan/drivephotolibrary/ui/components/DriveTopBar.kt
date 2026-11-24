@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -58,6 +59,7 @@ fun DriveTopBar(
     onOpenVacationSync: () -> Unit,
     onOpenUserManagement: () -> Unit = {},
     onOpenSharedDriveConfig: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
     updateStatus: UpdateStatus = UpdateStatus.Idle,
     onCheckForUpdates: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -185,6 +187,16 @@ fun DriveTopBar(
                         },
                         onClick = { },
                         enabled = false
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Settings") },
+                        leadingIcon = {
+                            Icon(Icons.Default.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        },
+                        onClick = {
+                            showMenu = false
+                            onOpenSettings()
+                        }
                     )
                     DropdownMenuItem(
                         text = { Text("Users & Security") },

@@ -26,6 +26,12 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 
+enum class AppThemeMode(val title: String) {
+    SYSTEM("System Default"),
+    LIGHT("Light Mode"),
+    DARK("Dark Mode")
+}
+
 private val DarkColorScheme = darkColorScheme(
     primary = primaryDark,
     primaryContainer = primaryContainerDark,
@@ -42,7 +48,12 @@ private val LightColorScheme = lightColorScheme(
 
 @Composable
 fun DrivePhotoLibraryTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    themeMode: AppThemeMode = AppThemeMode.SYSTEM,
+    darkTheme: Boolean = when (themeMode) {
+        AppThemeMode.SYSTEM -> isSystemInDarkTheme()
+        AppThemeMode.LIGHT -> false
+        AppThemeMode.DARK -> true
+    },
     // Dynamic color is available on Android 12+
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit
@@ -62,4 +73,3 @@ fun DrivePhotoLibraryTheme(
         content = content
     )
 }
-

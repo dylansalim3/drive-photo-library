@@ -27,13 +27,16 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         setContent {
-            DrivePhotoLibraryTheme {
+            val uiState by viewModel.uiState.collectAsState()
+
+            DrivePhotoLibraryTheme(
+                themeMode = uiState.themeMode,
+                dynamicColor = uiState.dynamicColor
+            ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    val uiState by viewModel.uiState.collectAsState()
-
                     if (uiState.isLoadingAuth && uiState.authStatus == null) {
                         Box(
                             modifier = Modifier.fillMaxSize(),

@@ -1,5 +1,6 @@
 package com.dylan.drivephotolibrary.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -156,6 +157,7 @@ fun DriveScreen(
                     },
                     onOpenUserManagement = { viewModel.openUserManagement() },
                     onOpenSharedDriveConfig = { viewModel.openSharedDriveConfig() },
+                    onOpenSettings = { viewModel.setShowSettingsScreen(true) },
                     updateStatus = uiState.updateStatus,
                     onCheckForUpdates = { viewModel.checkForAppUpdates(silent = false) }
                 )
@@ -771,6 +773,18 @@ fun DriveScreen(
             onInstall = { viewModel.installDownloadedApk(context) },
             onCancelDownload = { viewModel.cancelAppUpdate() },
             onDismiss = { viewModel.dismissAppUpdateDialog() }
+        )
+    }
+
+    // Dedicated Full-Screen Settings Page
+    if (uiState.showSettingsScreen) {
+        BackHandler {
+            viewModel.setShowSettingsScreen(false)
+        }
+        SettingsScreen(
+            uiState = uiState,
+            viewModel = viewModel,
+            onBack = { viewModel.setShowSettingsScreen(false) }
         )
     }
 }

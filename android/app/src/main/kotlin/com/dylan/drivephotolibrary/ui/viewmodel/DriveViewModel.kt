@@ -16,13 +16,16 @@ import com.dylan.drivephotolibrary.data.model.SessionItem
 import com.dylan.drivephotolibrary.data.model.StorageBreakdown
 import com.dylan.drivephotolibrary.data.model.TreeItem
 import com.dylan.drivephotolibrary.data.repository.DriveRepository
+import com.dylan.drivephotolibrary.data.settings.ThemePreferences
 import com.dylan.drivephotolibrary.data.update.AppUpdateManager
 import com.dylan.drivephotolibrary.data.update.UpdateInfo
 import com.dylan.drivephotolibrary.data.update.UpdateStatus
 import com.dylan.drivephotolibrary.data.upload.ResumableUploader
 import com.dylan.drivephotolibrary.data.upload.UploadWorker
 import com.dylan.drivephotolibrary.data.util.ZipDownloader
+import com.dylan.drivephotolibrary.ui.theme.AppThemeMode
 import com.dylan.drivephotolibrary.ui.util.Formatters
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -135,7 +138,11 @@ data class DriveUiState(
     val isTrashing: Boolean = false,
     // Remote OTA Updates
     val updateStatus: UpdateStatus = UpdateStatus.Idle,
-    val showUpdateDialog: Boolean = false
+    val showUpdateDialog: Boolean = false,
+    // Theme & Settings Screen
+    val themeMode: AppThemeMode = AppThemeMode.SYSTEM,
+    val dynamicColor: Boolean = false,
+    val showSettingsScreen: Boolean = false
 ) {
     val uploaders: List<String>
         get() = files.mapNotNull { it.uploadedBy }.distinct()
@@ -195,10 +202,47 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
     private var searchDebounceJob: Job? = null
     private val updateManager = AppUpdateManager(application)
     private var updateDownloadJob: Job? = null
+    private val themePreferences = ThemePreferences(application)
 
     init {
+        viewModelScope.launch {
+            themePreferences.themeMode.collect { mode ->
+                _uiState.update { it.copy(themeMode = mode) }
+            }
+        }
+        viewModelScope.launch {
+            themePreferences.dynamicColor.collect { dyn ->
+                _uiState.update { it.copy(dynamicColor = dyn) }
+            }
+        }
         checkAuth()
         checkForAppUpdates(silent = true)
+    }
+
+    fun setThemeMode(mode: AppThemeMode) {
+        themePreferences.setThemeMode(mode)
+    }
+
+    fun setDynamicColor(enabled: Boolean) {
+        themePreferences.setDynamicColor(enabled)
+    }
+
+    fun setShowSettingsScreen(show: Boolean) {
+        _uiState.update { it.copy(showSettingsScreen = show) }
+    }
+
+    fun clearThumbnailCache() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val app = getApplication<Application>()
+                val cacheDir = app.cacheDir
+                cacheDir.deleteRecursively()
+                cacheDir.mkdirs()
+                _uiState.update { it.copy(actionNotice = "Thumbnail cache cleared.") }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(actionNotice = "Failed to clear cache: ${e.message}") }
+            }
+        }
     }
 
     fun checkAuth() {
