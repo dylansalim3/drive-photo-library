@@ -1028,8 +1028,17 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
                         _uiState.update {
                             it.copy(
                                 updateStatus = UpdateStatus.Available(info),
-                                showUpdateDialog = !silent
+                                showUpdateDialog = true
                             )
+                        }
+                    } else if (info != null) {
+                        if (!silent) {
+                            _uiState.update {
+                                it.copy(
+                                    updateStatus = UpdateStatus.UpToDate(info),
+                                    showUpdateDialog = true
+                                )
+                            }
                         }
                     } else {
                         if (!silent) {
@@ -1037,7 +1046,7 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
                                 it.copy(
                                     updateStatus = UpdateStatus.Idle,
                                     showUpdateDialog = false,
-                                    actionNotice = "You are already on the latest version (${info?.currentVersion ?: "up to date"})"
+                                    actionNotice = "You are already on the latest version"
                                 )
                             }
                         }

@@ -34,6 +34,7 @@ sealed interface UpdateStatus {
     data object Idle : UpdateStatus
     data object Checking : UpdateStatus
     data class Available(val info: UpdateInfo) : UpdateStatus
+    data class UpToDate(val info: UpdateInfo) : UpdateStatus
     data class Downloading(
         val info: UpdateInfo,
         val progress: Float, // 0.0f to 1.0f

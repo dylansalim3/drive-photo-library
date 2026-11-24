@@ -1,16 +1,28 @@
 package com.dylan.drivephotolibrary.ui.screens
 
+import android.app.Activity
 import android.app.DownloadManager
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Environment
 import android.view.ViewGroup
+import android.view.Window
 import android.widget.FrameLayout
 import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
@@ -38,6 +50,8 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Map
@@ -54,8 +68,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -63,17 +79,26 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil3.compose.SubcomposeAsyncImage
@@ -85,7 +110,31 @@ import com.dylan.drivephotolibrary.ui.util.DevicePosture
 import com.dylan.drivephotolibrary.ui.util.ExifFormatter
 import com.dylan.drivephotolibrary.ui.util.Formatters
 import com.dylan.drivephotolibrary.ui.util.rememberDevicePosture
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
+fun Context.findActivity(): Activity? {
+    var ctx = this
+    while (ctx is ContextWrapper) {
+        if (ctx is Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
+}
+
+fun setSystemBarsVisible(show: Boolean, activity: Activity?, dialogWindow: Window?) {
+    val windows = listOfNotNull(dialogWindow, activity?.window).distinct()
+    for (win in windows) {
+        val controller = WindowCompat.getInsetsController(win, win.decorView)
+        if (show) {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        } else {
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+}
 
 @Composable
 fun MediaViewerDialog(
@@ -104,10 +153,70 @@ fun MediaViewerDialog(
         pageCount = { files.size }
     )
     val currentFile = files[pagerState.currentPage]
+    val isCurrentVideo = currentFile.isVideo
     val devicePosture by rememberDevicePosture()
 
+    val activity = remember(context) { context.findActivity() }
+    val dialogWindow = (LocalView.current.parent as? DialogWindowProvider)?.window
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+    var areControlsVisible by remember { mutableStateOf(true) }
+    var isVideoPlaying by remember { mutableStateOf(false) }
+    var userInteractionTrigger by remember { mutableLongStateOf(0L) }
+
+    fun toggleOrientation() {
+        val act = activity ?: return
+        if (isLandscape) {
+            act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        } else {
+            act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        }
+    }
+
+    // Auto-hide controls and system bars after 3 seconds of video playback
+    LaunchedEffect(isVideoPlaying, areControlsVisible, userInteractionTrigger, isCurrentVideo) {
+        if (isCurrentVideo && isVideoPlaying && areControlsVisible) {
+            delay(3000)
+            areControlsVisible = false
+        }
+    }
+
+    // Sync system bars with current media type and control visibility
+    LaunchedEffect(areControlsVisible, isCurrentVideo) {
+        if (isCurrentVideo) {
+            setSystemBarsVisible(areControlsVisible, activity, dialogWindow)
+        } else {
+            // Photos: always keep native status & navigation bars visible
+            setSystemBarsVisible(true, activity, dialogWindow)
+        }
+    }
+
+    // When swiping to a photo, immediately restore system bars and controls
+    LaunchedEffect(pagerState.currentPage) {
+        val file = files.getOrNull(pagerState.currentPage)
+        if (file?.isVideo != true) {
+            areControlsVisible = true
+            setSystemBarsVisible(true, activity, dialogWindow)
+        } else {
+            areControlsVisible = true
+        }
+    }
+
+    // Restore orientation and system bars when leaving media viewer
+    DisposableEffect(Unit) {
+        onDispose {
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            setSystemBarsVisible(true, activity, dialogWindow)
+        }
+    }
+
     Dialog(
-        onDismissRequest = onClose,
+        onDismissRequest = {
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            setSystemBarsVisible(true, activity, dialogWindow)
+            onClose()
+        },
         properties = DialogProperties(
             usePlatformDefaultWidth = false,
             decorFitsSystemWindows = false
@@ -136,16 +245,28 @@ fun MediaViewerDialog(
                             contentAlignment = Alignment.Center
                         ) {
                             if (file.isVideo) {
-                                VideoPlayerItem(file = file)
+                                VideoPlayerItem(
+                                    file = file,
+                                    areControlsVisible = true,
+                                    onToggleControls = {},
+                                    onIsPlayingChanged = {}
+                                )
                             } else {
-                                PhotoViewerItem(file = file)
+                                PhotoViewerItem(
+                                    file = file,
+                                    onToggleControls = {}
+                                )
                             }
                         }
                     }
 
                     // Back button on upper screen
                     IconButton(
-                        onClick = onClose,
+                        onClick = {
+                            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                            setSystemBarsVisible(true, activity, dialogWindow)
+                            onClose()
+                        },
                         modifier = Modifier
                             .statusBarsPadding()
                             .padding(8.dp)
@@ -334,185 +455,248 @@ fun MediaViewerDialog(
                     .fillMaxSize()
                     .background(Color.Black)
             ) {
-            // Horizontal Swipeable Pager across all media
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier.fillMaxSize()
-            ) { page ->
-                val file = files[page]
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (file.isVideo) {
-                        VideoPlayerItem(file = file)
-                    } else {
-                        PhotoViewerItem(file = file)
+                // Horizontal Swipeable Pager across all media
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize()
+                ) { page ->
+                    val file = files[page]
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (file.isVideo) {
+                            VideoPlayerItem(
+                                file = file,
+                                areControlsVisible = areControlsVisible,
+                                onToggleControls = {
+                                    areControlsVisible = !areControlsVisible
+                                    userInteractionTrigger = System.currentTimeMillis()
+                                },
+                                onIsPlayingChanged = { isPlaying ->
+                                    isVideoPlaying = isPlaying
+                                    if (isPlaying) {
+                                        userInteractionTrigger = System.currentTimeMillis()
+                                    }
+                                }
+                            )
+                        } else {
+                            PhotoViewerItem(
+                                file = file,
+                                onToggleControls = {
+                                    areControlsVisible = !areControlsVisible
+                                }
+                            )
+                        }
                     }
                 }
-            }
 
-            // Top Bar Overlay
-            Surface(
-                color = Color(0x99000000),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.TopCenter)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .statusBarsPadding()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                // Top Bar Overlay
+                AnimatedVisibility(
+                    visible = areControlsVisible,
+                    enter = fadeIn(tween(200)) + slideInVertically(initialOffsetY = { -it }),
+                    exit = fadeOut(tween(200)) + slideOutVertically(targetOffsetY = { -it }),
+                    modifier = Modifier.align(Alignment.TopCenter)
                 ) {
-                    IconButton(onClick = onClose) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Close",
-                            tint = Color.White
-                        )
-                    }
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(start = 8.dp)
+                    Surface(
+                        color = Color(0x99000000),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .statusBarsPadding()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = currentFile.name,
-                                color = Color.White,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f, fill = false)
-                            )
-                            if (!currentFile.uploadedBy.isNullOrBlank()) {
-                                UploaderAvatarPill(
-                                    username = currentFile.uploadedBy,
-                                    size = PillSize.SMALL,
-                                    isGlass = true
+                            IconButton(onClick = {
+                                activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                                setSystemBarsVisible(true, activity, dialogWindow)
+                                onClose()
+                            }) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Close",
+                                    tint = Color.White
+                                )
+                            }
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(start = 8.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        text = currentFile.name,
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false)
+                                    )
+                                    if (!currentFile.uploadedBy.isNullOrBlank()) {
+                                        UploaderAvatarPill(
+                                            username = currentFile.uploadedBy,
+                                            size = PillSize.SMALL,
+                                            isGlass = true
+                                        )
+                                    }
+                                }
+                                val meta = listOfNotNull(
+                                    Formatters.formatBytes(currentFile.size).ifBlank { null },
+                                    Formatters.formatDate(currentFile.createdTime ?: currentFile.modifiedTime).ifBlank { null }
+                                ).joinToString(" · ")
+                                if (meta.isNotBlank()) {
+                                    Text(
+                                        text = meta,
+                                        color = Color(0xCCFFFFFF),
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                            }
+
+                            // EXIF Info button
+                            IconButton(onClick = { showExifSheet = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.Info,
+                                    contentDescription = "EXIF and location info",
+                                    tint = Color.White
                                 )
                             }
                         }
-                        val meta = listOfNotNull(
-                            Formatters.formatBytes(currentFile.size).ifBlank { null },
-                            Formatters.formatDate(currentFile.createdTime ?: currentFile.modifiedTime).ifBlank { null }
-                        ).joinToString(" · ")
-                        if (meta.isNotBlank()) {
-                            Text(
-                                text = meta,
-                                color = Color(0xCCFFFFFF),
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-                    }
-
-                    // EXIF Info button
-                    IconButton(onClick = { showExifSheet = true }) {
-                        Icon(
-                            imageVector = Icons.Default.Info,
-                            contentDescription = "EXIF and location info",
-                            tint = Color.White
-                        )
                     }
                 }
-            }
 
-            // Floating Bottom Control Bar (Google Drive / Lenso UI style)
-            Surface(
-                shape = RoundedCornerShape(24.dp),
-                color = Color(0xCC1F2937),
-                shadowElevation = 8.dp,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(bottom = 16.dp)
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                // Dedicated Orientation / Fullscreen Toggle button for video
+                if (isCurrentVideo) {
+                    AnimatedVisibility(
+                        visible = areControlsVisible,
+                        enter = fadeIn(tween(200)),
+                        exit = fadeOut(tween(200)),
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .navigationBarsPadding()
+                            .padding(end = 16.dp, bottom = 84.dp)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = Color(0xCC1F2937),
+                            shadowElevation = 8.dp
+                        ) {
+                            IconButton(
+                                onClick = { toggleOrientation() },
+                                modifier = Modifier.size(44.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isLandscape) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                                    contentDescription = if (isLandscape) "Exit Fullscreen" else "Fullscreen / Landscape",
+                                    tint = Color.White
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Floating Bottom Control Bar (Google Drive / Lenso UI style)
+                AnimatedVisibility(
+                    visible = areControlsVisible,
+                    enter = fadeIn(tween(200)) + slideInVertically(initialOffsetY = { it }),
+                    exit = fadeOut(tween(200)) + slideOutVertically(targetOffsetY = { it }),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
+                        .padding(bottom = 16.dp)
                 ) {
-                    // Previous
-                    IconButton(
-                        onClick = {
-                            if (pagerState.currentPage > 0) {
-                                scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) }
-                            }
-                        },
-                        enabled = pagerState.currentPage > 0
+                    Surface(
+                        shape = RoundedCornerShape(24.dp),
+                        color = Color(0xCC1F2937),
+                        shadowElevation = 8.dp
                     ) {
-                        Icon(
-                            Icons.Default.ChevronLeft,
-                            contentDescription = "Previous",
-                            tint = if (pagerState.currentPage > 0) Color.White else Color(0x44FFFFFF)
-                        )
-                    }
-
-                    // Index counter
-                    Text(
-                        text = "${pagerState.currentPage + 1} / ${files.size}",
-                        color = Color.White,
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Medium
-                    )
-
-                    // Next
-                    IconButton(
-                        onClick = {
-                            if (pagerState.currentPage < files.size - 1) {
-                                scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Previous
+                            IconButton(
+                                onClick = {
+                                    if (pagerState.currentPage > 0) {
+                                        scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) }
+                                    }
+                                },
+                                enabled = pagerState.currentPage > 0
+                            ) {
+                                Icon(
+                                    Icons.Default.ChevronLeft,
+                                    contentDescription = "Previous",
+                                    tint = if (pagerState.currentPage > 0) Color.White else Color(0x44FFFFFF)
+                                )
                             }
-                        },
-                        enabled = pagerState.currentPage < files.size - 1
-                    ) {
-                        Icon(
-                            Icons.Default.ChevronRight,
-                            contentDescription = "Next",
-                            tint = if (pagerState.currentPage < files.size - 1) Color.White else Color(0x44FFFFFF)
-                        )
-                    }
 
-                    // EXIF Action
-                    IconButton(onClick = { showExifSheet = true }) {
-                        Icon(
-                            Icons.Default.Info,
-                            contentDescription = "EXIF info & location",
-                            tint = Color.White
-                        )
-                    }
-
-                    // Download Action
-                    IconButton(onClick = {
-                        downloadMediaFile(context, currentFile)
-                    }) {
-                        Icon(
-                            Icons.Default.Download,
-                            contentDescription = "Download to device",
-                            tint = Color.White
-                        )
-                    }
-
-                    // Mark synced button if not synced
-                    if (currentFile.syncStatus == "not-sync") {
-                        IconButton(onClick = {
-                            onMarkSynced(currentFile.id)
-                        }) {
-                            Icon(
-                                Icons.Default.Check,
-                                contentDescription = "Mark as synced",
-                                tint = Color(0xFF34D399)
+                            // Index counter
+                            Text(
+                                text = "${pagerState.currentPage + 1} / ${files.size}",
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Medium
                             )
+
+                            // Next
+                            IconButton(
+                                onClick = {
+                                    if (pagerState.currentPage < files.size - 1) {
+                                        scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
+                                    }
+                                },
+                                enabled = pagerState.currentPage < files.size - 1
+                            ) {
+                                Icon(
+                                    Icons.Default.ChevronRight,
+                                    contentDescription = "Next",
+                                    tint = if (pagerState.currentPage < files.size - 1) Color.White else Color(0x44FFFFFF)
+                                )
+                            }
+
+                            // EXIF Action
+                            IconButton(onClick = { showExifSheet = true }) {
+                                Icon(
+                                    Icons.Default.Info,
+                                    contentDescription = "EXIF info & location",
+                                    tint = Color.White
+                                )
+                            }
+
+                            // Download Action
+                            IconButton(onClick = {
+                                downloadMediaFile(context, currentFile)
+                            }) {
+                                Icon(
+                                    Icons.Default.Download,
+                                    contentDescription = "Download to device",
+                                    tint = Color.White
+                                )
+                            }
+
+                            // Mark synced button if not synced
+                            if (currentFile.syncStatus == "not-sync") {
+                                IconButton(onClick = {
+                                    onMarkSynced(currentFile.id)
+                                }) {
+                                    Icon(
+                                        Icons.Default.Check,
+                                        contentDescription = "Mark as synced",
+                                        tint = Color(0xFF34D399)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
-        }
         }
 
         if (showExifSheet) {
@@ -525,16 +709,41 @@ fun MediaViewerDialog(
 }
 
 @Composable
-private fun PhotoViewerItem(file: DriveFile) {
+private fun PhotoViewerItem(
+    file: DriveFile,
+    onToggleControls: () -> Unit
+) {
     val fullUrl = "${NetworkModule.BASE_URL}media/file?id=${file.id}"
     var scale by remember { mutableFloatStateOf(1f) }
-    val transformState = rememberTransformableState { zoomChange, _, _ ->
+    var offset by remember { mutableStateOf(Offset.Zero) }
+
+    val transformState = rememberTransformableState { zoomChange, offsetChange, _ ->
         scale = (scale * zoomChange).coerceIn(1f, 5f)
+        if (scale > 1f) {
+            offset += offsetChange
+        } else {
+            offset = Offset.Zero
+        }
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = {
+                        onToggleControls()
+                    },
+                    onDoubleTap = {
+                        if (scale > 1f) {
+                            scale = 1f
+                            offset = Offset.Zero
+                        } else {
+                            scale = 2.5f
+                        }
+                    }
+                )
+            }
             .transformable(state = transformState),
         contentAlignment = Alignment.Center
     ) {
@@ -551,14 +760,21 @@ private fun PhotoViewerItem(file: DriveFile) {
                 .fillMaxSize()
                 .graphicsLayer(
                     scaleX = scale,
-                    scaleY = scale
+                    scaleY = scale,
+                    translationX = offset.x,
+                    translationY = offset.y
                 )
         )
     }
 }
 
 @Composable
-private fun VideoPlayerItem(file: DriveFile) {
+private fun VideoPlayerItem(
+    file: DriveFile,
+    areControlsVisible: Boolean,
+    onToggleControls: () -> Unit,
+    onIsPlayingChanged: (Boolean) -> Unit
+) {
     val context = LocalContext.current
     val videoUrl = "${NetworkModule.BASE_URL}media/file?id=${file.id}"
 
@@ -571,24 +787,53 @@ private fun VideoPlayerItem(file: DriveFile) {
     }
 
     DisposableEffect(file.id) {
+        val listener = object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                onIsPlayingChanged(isPlaying)
+            }
+        }
+        exoPlayer.addListener(listener)
         onDispose {
+            exoPlayer.removeListener(listener)
             exoPlayer.release()
         }
     }
 
-    AndroidView(
-        factory = { ctx ->
-            PlayerView(ctx).apply {
-                player = exoPlayer
-                useController = true
-                layoutParams = FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT
-                )
-            }
-        },
+    var playerViewRef by remember { mutableStateOf<PlayerView?>(null) }
+
+    LaunchedEffect(areControlsVisible, playerViewRef) {
+        val pv = playerViewRef ?: return@LaunchedEffect
+        if (areControlsVisible) {
+            pv.showController()
+        } else {
+            pv.hideController()
+        }
+    }
+
+    Box(
         modifier = Modifier.fillMaxSize()
-    )
+    ) {
+        AndroidView(
+            factory = { ctx ->
+                PlayerView(ctx).apply {
+                    player = exoPlayer
+                    useController = true
+                    layoutParams = FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                    setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
+                        val isVisible = visibility == android.view.View.VISIBLE
+                        if (isVisible != areControlsVisible) {
+                            onToggleControls()
+                        }
+                    })
+                    playerViewRef = this
+                }
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+    }
 }
 
 private fun downloadMediaFile(context: Context, file: DriveFile) {
@@ -635,29 +880,29 @@ fun ExifInfoBottomSheet(
     file: DriveFile,
     onDismiss: () -> Unit
 ) {
+    val exif = file.imageMediaMetadata
+    val videoExif = file.videoMediaMetadata
+    val camera = ExifFormatter.formatCamera(exif?.cameraMake, exif?.cameraModel)
+    val lens = exif?.lens?.trim()
+    val exposure = ExifFormatter.formatExposureTime(exif?.exposureTime)
+    val aperture = ExifFormatter.formatAperture(exif?.aperture)
+    val focalLength = ExifFormatter.formatFocalLength(exif?.focalLength)
+    val iso = ExifFormatter.formatIso(exif?.isoSpeed)
+    val resolution = ExifFormatter.formatResolution(
+        exif?.width ?: videoExif?.width,
+        exif?.height ?: videoExif?.height
+    )
+    val duration = ExifFormatter.formatDuration(videoExif?.durationMillis)
+    val coords = ExifFormatter.formatCoordinates(exif?.location?.latitude, exif?.location?.longitude)
+    val altitude = ExifFormatter.formatAltitude(exif?.location?.altitude)
+    val context = LocalContext.current
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = Color(0xFF1E293B),
         contentColor = Color.White,
         dragHandle = { BottomSheetDefaults.DragHandle(color = Color(0x66FFFFFF)) }
     ) {
-        val exif = file.imageMediaMetadata
-        val videoExif = file.videoMediaMetadata
-        val camera = ExifFormatter.formatCamera(exif?.cameraMake, exif?.cameraModel)
-        val lens = exif?.lens?.trim()
-        val exposure = ExifFormatter.formatExposureTime(exif?.exposureTime)
-        val aperture = ExifFormatter.formatAperture(exif?.aperture)
-        val focalLength = ExifFormatter.formatFocalLength(exif?.focalLength)
-        val iso = ExifFormatter.formatIso(exif?.isoSpeed)
-        val resolution = ExifFormatter.formatResolution(
-            exif?.width ?: videoExif?.width,
-            exif?.height ?: videoExif?.height
-        )
-        val duration = ExifFormatter.formatDuration(videoExif?.durationMillis)
-        val coords = ExifFormatter.formatCoordinates(exif?.location?.latitude, exif?.location?.longitude)
-        val altitude = ExifFormatter.formatAltitude(exif?.location?.altitude)
-        val context = LocalContext.current
-
         Column(
             modifier = Modifier
                 .fillMaxWidth()

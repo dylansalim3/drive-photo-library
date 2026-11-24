@@ -1,13 +1,15 @@
-import { useState, useEffect, type FormEvent } from "react";
+import { useState, useEffect } from "react";
 import { cx } from "@/utils/cx";
 import {
   RiCheckLine,
+  RiCloseLine,
   RiDriveLine,
   RiExternalLinkLine,
   RiFileCopyLine,
   RiFolderLine,
   RiFolderSharedLine,
   RiInformationLine,
+  RiLink,
   RiRefreshLine,
   RiRestartLine,
   RiSearchLine,
@@ -28,6 +30,33 @@ interface SharedFolderConfigSectionProps {
   onFolderChanged?: () => void;
 }
 
+function extractFolderId(input: string): string {
+  const trimmed = input.trim();
+  const folderMatch = trimmed.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if (folderMatch) return folderMatch[1];
+  const driveMatch = trimmed.match(/\/drives\/([a-zA-Z0-9_-]+)/);
+  if (driveMatch) return driveMatch[1];
+  const idParamMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (idParamMatch) return idParamMatch[1];
+  return trimmed;
+}
+
+function looksLikeFolderIdOrUrl(input: string): boolean {
+  const trimmed = input.trim();
+  if (
+    trimmed.includes("drive.google.com") ||
+    trimmed.includes("/folders/") ||
+    trimmed.includes("/drives/")
+  ) {
+    return true;
+  }
+  // Drive folder IDs are typically 20-50 alphanumeric characters with dashes/underscores
+  if (trimmed.length >= 20 && !trimmed.includes(" ") && /^[a-zA-Z0-9_-]+$/.test(trimmed)) {
+    return true;
+  }
+  return false;
+}
+
 export function SharedFolderConfigSection({
   status,
   onFolderChanged,
@@ -36,13 +65,15 @@ export function SharedFolderConfigSection({
   const [config, setConfig] = useState<DriveConfigResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [folderInput, setFolderInput] = useState("");
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [showHowTo, setShowHowTo] = useState(false);
   const [folderTab, setFolderTab] = useState<"self" | "shared" | "drives">("self");
   const [searchQuery, setSearchQuery] = useState("");
+
+  const isDirectIdOrUrl = looksLikeFolderIdOrUrl(searchQuery);
+  const detectedFolderId = isDirectIdOrUrl ? extractFolderId(searchQuery) : "";
 
   const fetchConfig = async (search?: string) => {
     setLoading(true);
@@ -66,6 +97,10 @@ export function SharedFolderConfigSection({
       void fetchConfig();
       return;
     }
+    if (looksLikeFolderIdOrUrl(trimmed)) {
+      // Don't search Google Drive when user pasted a direct ID or URL
+      return;
+    }
     const timer = setTimeout(() => {
       void fetchConfig(trimmed);
     }, 350);
@@ -83,16 +118,16 @@ export function SharedFolderConfigSection({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleConnectFolder = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!folderInput.trim()) return;
+  const handleConnectDirect = async (idOrUrl: string) => {
+    const folderId = extractFolderId(idOrUrl);
+    if (!folderId) return;
     setSaving(true);
     setError(null);
     setSuccess(null);
     try {
-      const res = await setSharedRootFolder(folderInput.trim());
+      const res = await setSharedRootFolder(folderId);
       setSuccess(`Connected to '${res.rootFolderName}'! All users will now see and upload to this shared folder.`);
-      setFolderInput("");
+      setSearchQuery("");
       await fetchConfig();
       onFolderChanged?.();
     } catch (err) {
@@ -205,27 +240,40 @@ export function SharedFolderConfigSection({
       )}
 
       {/* Active Root Folder Display */}
-      <div className="flex flex-col gap-2 p-3 rounded-2xl border border-border-button-default bg-background-secondary-default">
-        <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between p-3 rounded-2xl border border-border-button-default bg-background-secondary-default">
+        <div className="flex flex-col gap-1 min-w-0">
           <div className="flex items-center gap-2 min-w-0">
             <RiFolderSharedLine className="size-4 text-accent-500 shrink-0" />
             <p className="text-body-2-medium font-semibold text-text-primary truncate">
               {activeRootName}
             </p>
           </div>
+          <p className="text-caption-1-regular text-text-secondary font-mono truncate">
+            Folder ID: {activeRootId}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
           <a
             href={`https://drive.google.com/drive/folders/${activeRootId}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-1 text-caption-1-medium text-text-secondary hover:text-text-primary transition-colors shrink-0"
+            className="flex items-center gap-1 text-caption-1-medium text-text-secondary hover:text-text-primary transition-colors"
           >
-            <span>Open in Drive</span>
+            <span>Open</span>
             <RiExternalLinkLine className="size-3.5" />
           </a>
+          {isAdmin && (
+            <Button
+              variant="ghost"
+              size="small"
+              leadingIcon={RiRestartLine}
+              onClick={handleResetDefault}
+              disabled={saving}
+            >
+              Reset
+            </Button>
+          )}
         </div>
-        <p className="text-caption-1-regular text-text-secondary font-mono truncate">
-          Folder ID: {activeRootId}
-        </p>
       </div>
 
       {/* How it works banner */}
@@ -253,7 +301,7 @@ export function SharedFolderConfigSection({
               2. Click <strong>Share</strong> and share it with <span className="font-mono text-text-primary">{activeEmail || "the server's Google email"}</span> as an <strong>Editor</strong>.
             </p>
             <p>
-              3. Copy the folder URL or ID, paste it below, and click <strong>Connect Folder</strong>.
+              3. Copy the folder URL or ID, paste it into the search box below, and click <strong>Connect</strong>.
             </p>
             <p className="text-accent-500 font-medium">
               Everyone logging into this app will automatically see, view, and upload to this shared library with zero Google setup needed on their phones!
@@ -275,49 +323,11 @@ export function SharedFolderConfigSection({
         </div>
       )}
 
-      {/* Connect Shared Folder Form (Admin Only) */}
-      {isAdmin ? (
-        <form onSubmit={handleConnectFolder} className="flex flex-col gap-3">
-          <Input
-            label="Connect External or Shared Drive Folder"
-            placeholder="Paste Google Drive folder URL or folder ID"
-            value={folderInput}
-            onChange={setFolderInput}
-            hint="Supports Google Drive folder links, Shared Drives, and raw folder IDs."
-          />
-          <div className="flex items-center justify-between gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              size="small"
-              leadingIcon={RiRestartLine}
-              onClick={handleResetDefault}
-              disabled={saving}
-            >
-              Reset to default
-            </Button>
-            <Button
-              type="submit"
-              variant="primary"
-              size="small"
-              leadingIcon={RiFolderSharedLine}
-              disabled={saving || !folderInput.trim()}
-            >
-              {saving ? "Verifying access..." : "Connect Folder"}
-            </Button>
-          </div>
-        </form>
-      ) : (
-        <p className="text-caption-1-regular text-text-secondary">
-          Only administrators can change the active Google Drive library folder.
-        </p>
-      )}
-
       {/* Folders Explorer: Self Drive & Shared Folders */}
       <div className="flex flex-col gap-3 pt-3 border-t border-border-button-default">
         <div className="flex items-center justify-between">
           <p className="text-body-2-medium font-semibold text-text-primary">
-            Select Drive or Folder
+            Discovered Drives & Folders
           </p>
           <Button
             variant="ghost"
@@ -330,19 +340,83 @@ export function SharedFolderConfigSection({
           </Button>
         </div>
 
-        {/* Search input */}
-        <div className="relative">
-          <Input
-            type="text"
-            placeholder="Search all folders across Google Drive..."
-            value={searchQuery}
-            onChange={setSearchQuery}
-            className="w-full text-caption-1-regular pl-8"
-          />
-          <RiSearchLine className="size-4 text-text-secondary absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+        {/* Unified Search & Connect Input */}
+        <div className="relative flex items-center">
+          <div className="relative flex-1">
+            <Input
+              type="text"
+              placeholder="Search folders or paste Google Drive link / ID..."
+              value={searchQuery}
+              onChange={setSearchQuery}
+              className={cx(
+                "w-full text-caption-1-regular pl-8",
+                isDirectIdOrUrl && detectedFolderId ? "pr-28" : searchQuery ? "pr-8" : ""
+              )}
+            />
+            {isDirectIdOrUrl ? (
+              <RiLink className="size-4 text-accent-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            ) : (
+              <RiSearchLine className="size-4 text-text-secondary absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            )}
+          </div>
+          {isDirectIdOrUrl && detectedFolderId && (
+            <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
+              <Button
+                variant="primary"
+                size="small"
+                disabled={saving}
+                onClick={() => void handleConnectDirect(detectedFolderId)}
+              >
+                {saving ? "Connecting..." : "Connect"}
+              </Button>
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                className="p-1 rounded-md text-text-secondary hover:text-text-primary transition-colors"
+                title="Clear"
+              >
+                <RiCloseLine className="size-4" />
+              </button>
+            </div>
+          )}
+          {!isDirectIdOrUrl && searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery("")}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-md text-text-secondary hover:text-text-primary transition-colors"
+              title="Clear"
+            >
+              <RiCloseLine className="size-4" />
+            </button>
+          )}
         </div>
 
-        {/* Tab switcher (when not searching) */}
+        {/* Direct Link Detected Banner */}
+        {isDirectIdOrUrl && detectedFolderId && (
+          <div className="flex items-center justify-between p-3 rounded-2xl border border-accent-500/30 bg-accent-500/10">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <RiLink className="size-4 text-accent-500 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-body-2-medium font-semibold text-text-primary">
+                  Direct Folder Link / ID Detected
+                </p>
+                <p className="font-mono text-caption-1-regular text-text-secondary truncate">
+                  {detectedFolderId}
+                </p>
+              </div>
+            </div>
+            <Button
+              variant="primary"
+              size="small"
+              disabled={saving}
+              onClick={() => void handleConnectDirect(detectedFolderId)}
+            >
+              {saving ? "Connecting..." : "Connect Now"}
+            </Button>
+          </div>
+        )}
+
+        {/* Tab switcher (when not searching and not direct ID) */}
         {!searchQuery.trim() && (
           <div className="flex items-center gap-1.5 p-1 rounded-xl bg-background-secondary-default border border-border-button-default">
             <button
@@ -385,9 +459,9 @@ export function SharedFolderConfigSection({
         )}
 
         {/* Folder items */}
-        {searchQuery.trim() ? (
+        {searchQuery.trim() && !isDirectIdOrUrl ? (
           /* Search Results */
-          <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
+          <div className="flex flex-col gap-2 max-h-[420px] overflow-y-auto pr-1">
             <p className="text-caption-1-medium text-text-secondary">
               Search results for "{searchQuery.trim()}":
             </p>
@@ -443,14 +517,16 @@ export function SharedFolderConfigSection({
             ) : (
               <div className="p-4 rounded-2xl border border-dashed border-border-button-default bg-background-secondary-default/50 text-center">
                 <p className="text-caption-1-regular text-text-secondary">
-                  No folders found matching "{searchQuery.trim()}".
+                  {loading
+                    ? "Searching Google Drive..."
+                    : `No folders found matching "${searchQuery.trim()}".`}
                 </p>
               </div>
             )}
           </div>
         ) : folderTab === "self" ? (
           /* My Drive Folders */
-          <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
+          <div className="flex flex-col gap-2 max-h-[420px] overflow-y-auto pr-1">
             {config?.selfFolders && config.selfFolders.length > 0 ? (
               config.selfFolders.map((folder) => {
                 const isCurrent = folder.id === activeRootId;
@@ -507,7 +583,7 @@ export function SharedFolderConfigSection({
           </div>
         ) : folderTab === "shared" ? (
           /* Shared with Me Folders */
-          <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
+          <div className="flex flex-col gap-2 max-h-[420px] overflow-y-auto pr-1">
             {config?.sharedFolders && config.sharedFolders.length > 0 ? (
               config.sharedFolders.map((folder) => {
                 const isCurrent = folder.id === activeRootId;
@@ -568,7 +644,7 @@ export function SharedFolderConfigSection({
           </div>
         ) : (
           /* Shared Drives */
-          <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
+          <div className="flex flex-col gap-2 max-h-[420px] overflow-y-auto pr-1">
             {config?.sharedDrives && config.sharedDrives.length > 0 ? (
               config.sharedDrives.map((drive) => {
                 const isCurrent = drive.id === activeRootId;

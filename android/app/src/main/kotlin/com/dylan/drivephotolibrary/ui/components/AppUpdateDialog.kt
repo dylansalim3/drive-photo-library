@@ -78,6 +78,14 @@ fun AppUpdateDialog(
                         )
                     }
 
+                    is UpdateStatus.UpToDate -> {
+                        UpToDateContent(
+                            info = status.info,
+                            onForceReDownload = { onStartDownload(status.info) },
+                            onDismiss = onDismiss
+                        )
+                    }
+
                     is UpdateStatus.Downloading -> {
                         DownloadingContent(
                             info = status.info,
@@ -408,6 +416,69 @@ private fun ErrorContent(
     ) {
         Button(onClick = onDismiss) {
             Text("Dismiss")
+        }
+    }
+}
+
+@Composable
+private fun UpToDateContent(
+    info: UpdateInfo,
+    onForceReDownload: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.primaryContainer,
+            modifier = Modifier.size(44.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Default.CheckCircle,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Column {
+            Text(
+                text = "You're Up to Date",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "v${info.currentVersion} (Latest Release)",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+
+    Spacer(modifier = Modifier.height(16.dp))
+
+    Text(
+        text = "Your installed version (v${info.currentVersion}) matches the latest version available on GitHub. If you recently updated the server or want to reinstall the fresh APK build, you can re-download below.",
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+
+    Spacer(modifier = Modifier.height(20.dp))
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End
+    ) {
+        TextButton(onClick = onDismiss) {
+            Text("Close")
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Button(onClick = onForceReDownload) {
+            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Re-download APK")
         }
     }
 }
