@@ -23,9 +23,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.BrightnessAuto
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.FolderShared
@@ -34,7 +36,9 @@ import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -341,7 +345,179 @@ fun SettingsScreen(
                 }
             }
 
-            // ─── 4. ACCOUNT & SECURITY ───────────────────────────────────────
+            // ─── 4. CAMERA AUTO-BACKUP & DEDUPLICATION ───────────────────────
+            item {
+                SettingsSectionHeader(
+                    title = "Camera Auto-Backup & Deduplication",
+                    icon = Icons.Default.CloudSync
+                )
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                                Text(
+                                    text = "Auto-Backup Camera Media",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Automatically uploads new photos & videos from DCIM/Camera to Travel Inbox",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.outline
+                                )
+                            }
+                            Switch(
+                                checked = uiState.autoBackupEnabled,
+                                onCheckedChange = { viewModel.setAutoBackupEnabled(it) }
+                            )
+                        }
+
+                        if (uiState.autoBackupEnabled) {
+                            HorizontalDivider()
+
+                            // Wi-Fi Only constraint
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    modifier = Modifier.weight(1f).padding(end = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Wifi,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            text = "Wi-Fi Only",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            text = "Prevent using mobile cellular data",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.outline
+                                        )
+                                    }
+                                }
+                                Switch(
+                                    checked = uiState.autoBackupWifiOnly,
+                                    onCheckedChange = { viewModel.setAutoBackupWifiOnly(it) }
+                                )
+                            }
+
+                            // Charging Only constraint
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    modifier = Modifier.weight(1f).padding(end = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.BatteryChargingFull,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            text = "While Charging Only",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            text = "Only backup when device is plugged in",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.outline
+                                        )
+                                    }
+                                }
+                                Switch(
+                                    checked = uiState.autoBackupChargingOnly,
+                                    onCheckedChange = { viewModel.setAutoBackupChargingOnly(it) }
+                                )
+                            }
+
+                            HorizontalDivider()
+
+                            // Deduplication banner
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(
+                                        text = "Two-Tier Deduplication Active",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = "1. Local SQLite ledger: Instant 0ms skip for previously synced items.\n2. Remote Drive MD5 check: Zero network bytes transferred if file already exists in library.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    if (uiState.autoBackupSyncedCount > 0) {
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = "Synced ledger entries: ${uiState.autoBackupSyncedCount} items",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.outline
+                                        )
+                                    }
+                                    if (uiState.autoBackupLastResult.isNotBlank()) {
+                                        Text(
+                                            text = "Status: ${uiState.autoBackupLastResult}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.outline
+                                        )
+                                    }
+                                }
+                            }
+
+                            Button(
+                                onClick = { viewModel.triggerAutoBackupNow() },
+                                modifier = Modifier.fillMaxWidth(),
+                                enabled = !uiState.isAutoBackingUp
+                            ) {
+                                if (uiState.isAutoBackingUp) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.onPrimary
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Backing up Media...")
+                                } else {
+                                    Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Scan & Backup Now")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ─── 5. ACCOUNT & SECURITY ───────────────────────────────────────
             item {
                 SettingsSectionHeader(
                     title = "Account & Security",
@@ -420,7 +596,7 @@ fun SettingsScreen(
                 }
             }
 
-            // ─── 5. ABOUT & UPDATES ──────────────────────────────────────────
+            // ─── 6. ABOUT & UPDATES ──────────────────────────────────────────
             item {
                 SettingsSectionHeader(
                     title = "About & Updates",

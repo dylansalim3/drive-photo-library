@@ -6,6 +6,11 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
+import com.dylan.drivephotolibrary.data.backup.AutoBackupScheduler
+import com.dylan.drivephotolibrary.data.backup.SyncLedgerDatabase
+import com.dylan.drivephotolibrary.data.settings.AutoBackupPreferences
 import com.dylan.drivephotolibrary.data.model.AppUser
 import com.dylan.drivephotolibrary.data.model.AuthStatus
 import com.dylan.drivephotolibrary.data.model.Breadcrumb
@@ -142,7 +147,15 @@ data class DriveUiState(
     // Theme & Settings Screen
     val themeMode: AppThemeMode = AppThemeMode.SYSTEM,
     val dynamicColor: Boolean = false,
-    val showSettingsScreen: Boolean = false
+    val showSettingsScreen: Boolean = false,
+    // Phase 7: Camera Auto-Backup
+    val autoBackupEnabled: Boolean = false,
+    val autoBackupWifiOnly: Boolean = true,
+    val autoBackupChargingOnly: Boolean = true,
+    val autoBackupLastTime: Long = 0L,
+    val autoBackupLastResult: String = "",
+    val autoBackupSyncedCount: Int = 0,
+    val isAutoBackingUp: Boolean = false
 ) {
     val uploaders: List<String>
         get() = files.mapNotNull { it.uploadedBy }.distinct()
@@ -203,6 +216,8 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
     private val updateManager = AppUpdateManager(application)
     private var updateDownloadJob: Job? = null
     private val themePreferences = ThemePreferences(application)
+    private val autoBackupPreferences = AutoBackupPreferences.getInstance(application)
+    private val syncLedger = SyncLedgerDatabase.getInstance(application)
 
     init {
         viewModelScope.launch {
@@ -215,8 +230,79 @@ class DriveViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.update { it.copy(dynamicColor = dyn) }
             }
         }
+        viewModelScope.launch {
+            autoBackupPreferences.backupEnabled.collect { en ->
+                _uiState.update { it.copy(autoBackupEnabled = en) }
+            }
+        }
+        viewModelScope.launch {
+            autoBackupPreferences.wifiOnly.collect { wo ->
+                _uiState.update { it.copy(autoBackupWifiOnly = wo) }
+            }
+        }
+        viewModelScope.launch {
+            autoBackupPreferences.chargingOnly.collect { co ->
+                _uiState.update { it.copy(autoBackupChargingOnly = co) }
+            }
+        }
+        viewModelScope.launch {
+            autoBackupPreferences.lastBackupTime.collect { t ->
+                _uiState.update { it.copy(autoBackupLastTime = t) }
+            }
+        }
+        viewModelScope.launch {
+            autoBackupPreferences.lastBackupResult.collect { r ->
+                _uiState.update { it.copy(autoBackupLastResult = r) }
+            }
+        }
+        viewModelScope.launch {
+            WorkManager.getInstance(application)
+                .getWorkInfosForUniqueWorkFlow(AutoBackupScheduler.UNIQUE_IMMEDIATE_WORK_NAME)
+                .collect { workInfos ->
+                    val isRunning = workInfos.any { it.state == WorkInfo.State.RUNNING }
+                    _uiState.update { it.copy(isAutoBackingUp = isRunning) }
+                    refreshAutoBackupLedgerCount()
+                }
+        }
+        refreshAutoBackupLedgerCount()
         checkAuth()
         checkForAppUpdates(silent = true)
+    }
+
+    fun setAutoBackupEnabled(enabled: Boolean) {
+        autoBackupPreferences.setBackupEnabled(enabled)
+        val app = getApplication<Application>()
+        if (enabled) {
+            AutoBackupScheduler.schedule(app, _uiState.value.autoBackupWifiOnly, _uiState.value.autoBackupChargingOnly)
+        } else {
+            AutoBackupScheduler.cancel(app)
+        }
+    }
+
+    fun setAutoBackupWifiOnly(wifiOnly: Boolean) {
+        autoBackupPreferences.setWifiOnly(wifiOnly)
+        if (_uiState.value.autoBackupEnabled) {
+            AutoBackupScheduler.schedule(getApplication(), wifiOnly, _uiState.value.autoBackupChargingOnly)
+        }
+    }
+
+    fun setAutoBackupChargingOnly(chargingOnly: Boolean) {
+        autoBackupPreferences.setChargingOnly(chargingOnly)
+        if (_uiState.value.autoBackupEnabled) {
+            AutoBackupScheduler.schedule(getApplication(), _uiState.value.autoBackupWifiOnly, chargingOnly)
+        }
+    }
+
+    fun triggerAutoBackupNow() {
+        val app = getApplication<Application>()
+        AutoBackupScheduler.triggerImmediate(app)
+    }
+
+    fun refreshAutoBackupLedgerCount() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val count = syncLedger.getSyncedCount()
+            _uiState.update { it.copy(autoBackupSyncedCount = count) }
+        }
     }
 
     fun setThemeMode(mode: AppThemeMode) {

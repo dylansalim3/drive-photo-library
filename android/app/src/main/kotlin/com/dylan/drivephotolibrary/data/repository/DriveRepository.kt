@@ -204,6 +204,20 @@ class DriveRepository(private val context: Context) {
             }
         }
 
+    // Pre-flight Deduplication Check
+    suspend fun checkFileExists(
+        md5: String? = null,
+        fileName: String? = null,
+        size: Long? = null,
+        folderId: String? = null
+    ): Result<com.dylan.drivephotolibrary.data.model.FileCheckResponse> = withContext(Dispatchers.IO) {
+        try {
+            Result.success(api.checkFileExists(md5, fileName, size, folderId))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     // Phase 3: Resumable Upload
     suspend fun initUpload(
         fileName: String,

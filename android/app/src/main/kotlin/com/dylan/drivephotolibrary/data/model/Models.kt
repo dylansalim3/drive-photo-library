@@ -268,3 +268,13 @@ data class StorageBreakdown(
     val trashSize: Long = 0,
     val trashCount: Int = 0
 )
+
+@Serializable
+data class FileCheckResponse(
+    val ok: Boolean = true,
+    val exists: Boolean = false,
+    val fileId: String? = null,
+    val fileName: String? = null,
+    val matchType: String? = null
+)
+

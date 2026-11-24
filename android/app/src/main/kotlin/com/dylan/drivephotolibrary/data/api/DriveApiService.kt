@@ -9,6 +9,7 @@ import com.dylan.drivephotolibrary.data.model.CreateUserRequest
 import com.dylan.drivephotolibrary.data.model.CreateUserResponse
 import com.dylan.drivephotolibrary.data.model.DriveConfigResponse
 import com.dylan.drivephotolibrary.data.model.EmptyTrashRequest
+import com.dylan.drivephotolibrary.data.model.FileCheckResponse
 import com.dylan.drivephotolibrary.data.model.FilesResponse
 import com.dylan.drivephotolibrary.data.model.InitUploadRequest
 import com.dylan.drivephotolibrary.data.model.InitUploadResponse
@@ -100,6 +101,15 @@ interface DriveApiService {
 
     @POST("sessions/revoke")
     suspend fun revokeSession(@Body request: RevokeSessionRequest): ActionResponse
+
+    // Pre-flight Deduplication Check
+    @GET("upload/check")
+    suspend fun checkFileExists(
+        @Query("md5") md5: String? = null,
+        @Query("fileName") fileName: String? = null,
+        @Query("size") size: Long? = null,
+        @Query("folderId") folderId: String? = null
+    ): FileCheckResponse
 
     // Phase 3: Resumable Uploads
     @POST("upload/init")
