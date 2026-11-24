@@ -109,3 +109,23 @@ Comprehensive roadmap and feature tracking for **Drive Photo Library (DPL)**, in
   - [x] Preserves hierarchical folder structure and verifies byte integrity via atomic `.dpl_part` downloads.
   - [x] Automatically triggers `/api/files/:id/mark-synced` upon verified download to move items to `Travel Archive`.
   - [x] Setup and automation guides (`docs/DESKTOP_SYNC.md`) for Synology NAS, TrueNAS, Linux/macOS Cron, and systemd.
+
+---
+
+## 🔒 Phase 7: Camera Auto-Backup, Video Gestures & Biometrics (Completed ✅)
+
+- [x] **Background Camera Auto-Backup & Deduplication**:
+  - [x] Backend preflight check endpoint (`GET /api/upload/check`) matching Drive `md5Checksum` or filename+size in staging folder.
+  - [x] Tier 1 Deduplication: Android SQLite ledger (`dpl_sync_ledger.db`) providing instant 0ms skips for previously synced local media.
+  - [x] Tier 2 Deduplication: ContentResolver MD5 byte hashing + remote Drive preflight check for zero-byte network skip of existing files.
+  - [x] Android WorkManager background scheduler with `NetworkType.UNMETERED` (Wi-Fi) and `requiresCharging` constraints.
+  - [x] Settings Hub Camera Auto-Backup card with status, constraints toggles, and manual "Scan & Backup Now" trigger.
+- [x] **Advanced Video Player Gestures**:
+  - [x] Double-tap left half (seek -10s) and right half (seek +10s) with haptic feedback tick and animated expanding badges (`<< 10s` / `10s >>`).
+  - [x] Dual-zone vertical swipe gestures for screen brightness (left) and media volume (right) with centered progress pill overlay.
+  - [x] Playback speed chip & dropdown selector in video top bar (`0.5x`, `0.75x`, `1.0x`, `1.25x`, `1.5x`, `2.0x`) controlling ExoPlayer.
+- [x] **Biometric App Lock & Privacy**:
+  - [x] AndroidX BiometricPrompt API supporting fingerprint, face unlock, and device credential fallback.
+  - [x] Cold-start and background resume auto-lock with configurable timeouts (Immediately, 1m, 5m, 15m, Never).
+  - [x] Recent Apps privacy masking toggle applying `WindowManager.LayoutParams.FLAG_SECURE` in Android app switcher.
+  - [x] Full-screen animated `LockScreen` overlay protecting photo and video privacy.
